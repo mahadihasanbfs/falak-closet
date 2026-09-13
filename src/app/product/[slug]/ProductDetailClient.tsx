@@ -30,7 +30,7 @@ import {
   PackageCheck,
   Info
 } from 'lucide-react';
-import { Product } from '@/data/products';
+import { Product, ProductColor } from '@/data/products';
 import { formatCurrency } from '@/lib/utils';
 import { useCart } from '@/context/CartContext';
 import { useAnalytics } from '@/context/AnalyticsContext';
@@ -62,16 +62,38 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
     return found ? { ...initialProduct, ...found } : initialProduct;
   }, [products, initialProduct]);
 
+  // Selectable colors must come from VALID variations — storefront-visible,
+  // with BOTH a color and a size — deduplicated (case/whitespace-insensitive).
+  // A color that exists only in product.colors (no sellable variation) is never
+  // selectable, otherwise size/price lookups and add-to-cart silently break.
   const colorsList = useMemo(() => {
+    const validVars = (product?.variations || []).filter(
+      (v) => !v.isHidden && (v.colorName || '').trim() !== '' && (v.size || '').trim() !== ''
+    );
+
+    if (validVars.length > 0) {
+      const seen = new Set<string>();
+      const list: ProductColor[] = [];
+      for (const v of validVars) {
+        const name = (v.colorName || '').trim();
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        // Carry gallery info over from product.colors when the name matches.
+        const match = product?.colors?.find((c) => c.name.toLowerCase() === key);
+        list.push({
+          name,
+          hex: match?.hex || v.colorHex || '#000000',
+          ...(typeof match?.imageIndex === 'number' ? { imageIndex: match.imageIndex } : {}),
+          ...(match?.images && match.images.length > 0 ? { images: match.images } : {}),
+        });
+      }
+      return list;
+    }
+
+    // No valid variations — fall back to the declared colors (legacy behavior).
     if (!product?.colors || product.colors.length === 0) {
       return [{ name: 'Standard', hex: '#000000' }];
-    }
-    if (product.variations && product.variations.length > 0) {
-      const visibleColorNames = new Set(
-        product.variations.filter((v) => !v.isHidden).map((v) => v.colorName.toLowerCase())
-      );
-      const filtered = product.colors.filter((c) => visibleColorNames.has(c.name.toLowerCase()));
-      return filtered.length > 0 ? filtered : product.colors;
     }
     return product.colors;
   }, [product?.colors, product?.variations]);

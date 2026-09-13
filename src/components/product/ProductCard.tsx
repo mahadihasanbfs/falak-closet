@@ -429,69 +429,69 @@ export function ProductCard({ product, selectedColor }: ProductCardProps) {
 
             <div className="flex-1 overflow-y-auto">
               <div className="w-12 h-12 rounded-full bg-[#FDF2F3] text-[#A80C14] flex items-center justify-center mx-auto mb-4 border border-[#F8D2D5]">
-              <Heart className="w-6 h-6 fill-current" />
-            </div>
-
-            <h3 className="font-serif font-extrabold text-stone-900 text-lg mb-1">
-              Add to Wishlist
-            </h3>
-            <p className="text-xs text-stone-500 leading-relaxed mb-5">
-              Please sign in to save your favorite abayas, hijabs, and couture collections to your wishlist.
-            </p>
-
-            <form onSubmit={handleAuthSubmit} className="space-y-3.5 text-left">
-              <div>
-                <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="name@email.com"
-                  className="w-full text-xs px-3.5 py-2.5 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#A80C14]/20 focus:border-[#A80C14]"
-                />
+                <Heart className="w-6 h-6 fill-current" />
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  placeholder="Enter password"
-                  className="w-full text-xs px-3.5 py-2.5 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#A80C14]/20 focus:border-[#A80C14]"
-                />
+              <h3 className="font-serif font-extrabold text-stone-900 text-lg mb-1">
+                Add to Wishlist
+              </h3>
+              <p className="text-xs text-stone-500 leading-relaxed mb-5">
+                Please sign in to save your favorite abayas, hijabs, and couture collections to your wishlist.
+              </p>
+
+              <form onSubmit={handleAuthSubmit} className="space-y-3.5 text-left">
+                <div>
+                  <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="name@email.com"
+                    className="w-full text-xs px-3.5 py-2.5 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#A80C14]/20 focus:border-[#A80C14]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="Enter password"
+                    className="w-full text-xs px-3.5 py-2.5 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#A80C14]/20 focus:border-[#A80C14]"
+                  />
+                </div>
+
+                {authError && (
+                  <p className="text-[11px] font-bold text-red-500 mt-1">
+                    {authError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingAuth}
+                  className="w-full py-2.5 bg-[#A80C14] hover:bg-[#8C0A10] text-white font-bold text-xs rounded-xl shadow-md transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer mt-2"
+                >
+                  {isSubmittingAuth ? 'Signing in...' : 'Sign In'}
+                </button>
+              </form>
+
+              <div className="mt-4 text-center">
+                <Link
+                  href="/account?type=register"
+                  onClick={() => setShowAuthModal(false)}
+                  className="text-[11px] font-bold text-[#A80C14] hover:underline"
+                >
+                  Don&apos;t have an account? Sign Up
+                </Link>
               </div>
-
-              {authError && (
-                <p className="text-[11px] font-bold text-red-500 mt-1">
-                  {authError}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={isSubmittingAuth}
-                className="w-full py-2.5 bg-[#A80C14] hover:bg-[#8C0A10] text-white font-bold text-xs rounded-xl shadow-md transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer mt-2"
-              >
-                {isSubmittingAuth ? 'Signing in...' : 'Sign In'}
-              </button>
-            </form>
-
-            <div className="mt-4 text-center">
-              <Link
-                href="/account?type=register"
-                onClick={() => setShowAuthModal(false)}
-                className="text-[11px] font-bold text-[#A80C14] hover:underline"
-              >
-                Don&apos;t have an account? Sign Up
-              </Link>
-            </div>
             </div>
           </div>
         </div>

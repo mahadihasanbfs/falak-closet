@@ -421,7 +421,17 @@ export function ProductFormModal({
       }
 
       if (editingProduct.variations && editingProduct.variations.length > 0) {
-        setVariationsMatrix(editingProduct.variations);
+        // Deduplicate (normalized color+size, first occurrence wins) so legacy
+        // duplicate rows never come back into the catalog on save.
+        const seenVarKeys = new Set<string>();
+        setVariationsMatrix(
+          editingProduct.variations.filter((v) => {
+            const key = `${(v.colorName || '').trim().toLowerCase()}|${(v.size || '').trim().toLowerCase()}`;
+            if (seenVarKeys.has(key)) return false;
+            seenVarKeys.add(key);
+            return true;
+          })
+        );
       } else {
         const colors = editingProduct.colors && editingProduct.colors.length > 0
           ? editingProduct.colors

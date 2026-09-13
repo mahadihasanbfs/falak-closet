@@ -41,14 +41,17 @@ export function ProductVariationsGrid({ product }: ProductVariationsGridProps) {
       const items: VariationDisplayItem[] = [];
 
       product?.variations?.forEach((v, idx) => {
-        // Skip hidden variations
+        // Only storefront-visible variations (admin Eye toggle = isHidden !== true)
         if (v.isHidden) return;
 
+        // Must have BOTH a color and a size (non-empty after trimming) —
+        // incomplete variations are never shown in the grid.
         const colorNorm = (v.colorName || '').trim().toLowerCase();
-        const sizeNorm = (v.size || 'Free Size').trim().toLowerCase();
-        const uniqueKey = `${colorNorm}_${sizeNorm}`;
+        const sizeNorm = (v.size || '').trim().toLowerCase();
+        if (!colorNorm || !sizeNorm) return;
 
-        // Deduplicate
+        // Deduplicate by color+size (case/whitespace-insensitive, keep first)
+        const uniqueKey = `${colorNorm}_${sizeNorm}`;
         if (seenKeys.has(uniqueKey)) return;
         seenKeys.add(uniqueKey);
 
@@ -70,12 +73,12 @@ export function ProductVariationsGrid({ product }: ProductVariationsGridProps) {
         }
 
         items.push({
-          id: v.id || `${product.id}-${v.colorName}-${v.size}`,
+          id: v.id || `${product.id}-${colorNorm}-${sizeNorm}`,
           code: '',
           colorName: v.colorName,
           colorHex: v.colorHex || matchedColor?.hex,
           shortDetails: v.shortDetails,
-          size: v.size || 'Free Size',
+          size: v.size,
           price: v.price ?? v.priceOverride ?? product.price ?? 0,
           originalPrice: v.originalPrice ?? product.originalPrice,
           stock: v.stock ?? 0,

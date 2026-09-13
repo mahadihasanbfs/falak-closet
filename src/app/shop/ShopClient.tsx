@@ -97,11 +97,22 @@ function colorFacets(products: Product[]): Facet[] {
       seen.add(id);
       const existing = map.get(id);
       if (existing) existing.count += 1;
-      else map.set(id, { value: name.trim(), hex: hex || '#000000', count: 1 });
+      else {
+        let finalHex = hex;
+        if ((!finalHex || finalHex === '#000000' || finalHex === '#000') && p.colors) {
+          const match = p.colors.find((c) => norm(c.name) === id);
+          if (match?.hex) finalHex = match.hex;
+        }
+        map.set(id, { value: name.trim(), hex: finalHex || '#000000', count: 1 });
+      }
     };
 
     p.colors?.forEach((c) => add(c.name, c.hex));
-    p.variations?.forEach((v) => add(v.colorName, v.colorHex));
+    p.variations?.forEach((v) => {
+      if (!v.isHidden && v.colorName) {
+        add(v.colorName, v.colorHex || '');
+      }
+    });
   });
 
   return Array.from(map.values()).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
@@ -123,7 +134,11 @@ function sizeFacets(products: Product[]): Facet[] {
     };
 
     p.sizes?.forEach(add);
-    p.variations?.forEach((v) => add(v.size));
+    p.variations?.forEach((v) => {
+      if (!v.isHidden && v.size) {
+        add(v.size);
+      }
+    });
   });
 
   return Array.from(map.values()).sort(

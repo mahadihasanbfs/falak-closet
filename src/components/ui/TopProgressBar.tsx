@@ -110,6 +110,12 @@ export default function TopProgressBar() {
     const originalReplaceState = window.history.replaceState;
 
     window.history.pushState = function (...args) {
+      try {
+        const nextUrl = args[2] ? new URL(String(args[2]), window.location.href) : null;
+        if (nextUrl && nextUrl.pathname === window.location.pathname) {
+          return originalPushState.apply(this, args);
+        }
+      } catch {}
       isNavigating.current = true;
       setTimeout(() => {
         handleStart(true);
@@ -118,6 +124,12 @@ export default function TopProgressBar() {
     };
 
     window.history.replaceState = function (...args) {
+      try {
+        const nextUrl = args[2] ? new URL(String(args[2]), window.location.href) : null;
+        if (nextUrl && nextUrl.pathname === window.location.pathname) {
+          return originalReplaceState.apply(this, args);
+        }
+      } catch {}
       isNavigating.current = true;
       setTimeout(() => {
         handleStart(true);

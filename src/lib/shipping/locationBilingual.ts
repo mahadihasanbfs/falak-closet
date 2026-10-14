@@ -57,36 +57,39 @@ export const DHAKA_CORE_ZONES_MAPPING: LocationTranslation[] = [
   { en: 'Nikunja', bn: 'নিকুঞ্জ', aliases: ['nikunja', 'নিকুঞ্জ'] },
 ];
 
+import {
+  BANGLADESH_DISTRICTS,
+  BANGLADESH_DIVISIONS,
+} from './bangladeshLocations';
+
 /**
- * Major Bangladesh District / City Mappings.
+ * Major Bangladesh District / City Mappings generated from Bangladesh locations.
  */
+const EXTRA_ALIASES: Record<string, string[]> = {
+  Chattogram: ['chittagong', 'chattogram', 'চট্টগ্রাম'],
+  Bogura: ['bogra', 'bogura', 'বগুড়া', 'বগুড়া'],
+  Jashore: ['jessore', 'jashore', 'যশোর'],
+  Cumilla: ['comilla', 'cumilla', 'কুমিল্লা'],
+  Barishal: ['barisal', 'barishal', 'বরিশাল'],
+  Mymensingh: ['mymensingh', 'ময়মনসিংহ', 'ময়মনসিংহ'],
+  Brahmanbaria: ['brahmanbaria', 'ব্রাহ্মণবাড়িয়া', 'ব্রাহ্মণবাড়িয়া'],
+  Kushtia: ['kushtia', 'কুষ্টিয়া', 'কুষ্টিয়া'],
+  "Cox's Bazar": ['coxs bazar', "cox's bazar", 'কক্সবাজার'],
+};
+
 export const CITY_DISTRICT_MAPPING: LocationTranslation[] = [
-  { en: 'Dhaka', bn: 'ঢাকা', aliases: ['dhaka', 'ঢাকা'] },
-  { en: 'Chattogram', bn: 'চট্টগ্রাম', aliases: ['chattogram', 'chittagong', 'চট্টগ্রাম'] },
-  { en: 'Sylhet', bn: 'সিলেট', aliases: ['sylhet', 'সিলেট'] },
-  { en: 'Khulna', bn: 'খুলনা', aliases: ['khulna', 'খুলনা'] },
-  { en: 'Rajshahi', bn: 'রাজশাহী', aliases: ['rajshahi', 'রাজশাহী'] },
-  { en: 'Barishal', bn: 'বরিশাল', aliases: ['barishal', 'barisal', 'বরিশাল'] },
-  { en: 'Rangpur', bn: 'রংপুর', aliases: ['rangpur', 'রংপুর'] },
-  { en: 'Mymensingh', bn: 'ময়মনসিংহ', aliases: ['mymensingh', 'ময়মনসিংহ', 'ময়মনসিংহ'] },
-  { en: 'Cumilla', bn: 'কুমিল্লা', aliases: ['cumilla', 'comilla', 'কুমিল্লা'] },
-  { en: 'Cox\'s Bazar', bn: 'কক্সবাজার', aliases: ['coxs bazar', 'cox\'s bazar', 'কক্সবাজার'] },
-  { en: 'Bogura', bn: 'বগুড়া', aliases: ['bogura', 'bogra', 'বগুড়া', 'বগুড়া'] },
-  { en: 'Feni', bn: 'ফেনী', aliases: ['feni', 'ফেনী'] },
-  { en: 'Brahmanbaria', bn: 'ব্রাহ্মণবাড়িয়া', aliases: ['brahmanbaria', 'ব্রাহ্মণবাড়িয়া', 'ব্রাহ্মণবাড়িয়া'] },
-  { en: 'Jashore', bn: 'যশোর', aliases: ['jashore', 'jessore', 'যশোর'] },
-  { en: 'Pabna', bn: 'পাবনা', aliases: ['pabna', 'পাবনা'] },
-  { en: 'Tangail', bn: 'টাঙ্গাইল', aliases: ['tangail', 'টাঙ্গাইল'] },
-  { en: 'Narsingdi', bn: 'নরসিংদী', aliases: ['narsingdi', 'নরসিংদী'] },
-  { en: 'Manikganj', bn: 'মানিকগঞ্জ', aliases: ['manikganj', 'মানিকগঞ্জ'] },
-  { en: 'Munshiganj', bn: 'মুন্সিগঞ্জ', aliases: ['munshiganj', 'মুন্সিগঞ্জ'] },
-  { en: 'Faridpur', bn: 'ফরিদপুর', aliases: ['faridpur', 'ফরিদপুর'] },
-  { en: 'Jamalpur', bn: 'জামালপুর', aliases: ['jamalpur', 'জামালপুর'] },
-  { en: 'Sirajganj', bn: 'সিরাজগঞ্জ', aliases: ['sirajganj', 'সিরাজগঞ্জ'] },
-  { en: 'Kushtia', bn: 'কুষ্টিয়া', aliases: ['kushtia', 'কুষ্টিয়া', 'কুষ্টিয়া'] },
-  { en: 'Naogaon', bn: 'নওগাঁ', aliases: ['naogaon', 'নওগাঁ'] },
-  { en: 'Dinajpur', bn: 'দিনাজপুর', aliases: ['dinajpur', 'দিনাজপুর'] },
+  ...BANGLADESH_DIVISIONS.map((div) => ({
+    en: div.nameEn,
+    bn: div.nameBn,
+    aliases: [div.nameEn.toLowerCase(), div.nameBn, ...(EXTRA_ALIASES[div.nameEn] || [])],
+  })),
+  ...BANGLADESH_DISTRICTS.map((dist) => ({
+    en: dist.nameEn,
+    bn: dist.nameBn,
+    aliases: [dist.nameEn.toLowerCase(), dist.nameBn, ...(EXTRA_ALIASES[dist.nameEn] || [])],
+  })),
 ];
+
 
 /**
  * Checks if input represents Dhaka city (in English or Bengali).
@@ -175,6 +178,8 @@ export function matchZoneFromText(
 }
 
 export interface CalculateShippingFeeParams {
+  division?: string | null;
+  district?: string | null;
   city?: string | null;
   address?: string | null;
   zoneName?: string | null;
@@ -232,6 +237,9 @@ export function checkIsFreeDelivery(
   return false;
 }
 
+import { parseAddressLocation, ParsedLocation } from './addressParser';
+export { parseAddressLocation, type ParsedLocation };
+
 /**
  * Single source of truth for calculating tiered shipping rates in Bangladesh:
  * - Free Shipping: isFreeDelivery || subtotal >= freeShippingThreshold || product freeDeliveryQuantity met => ৳0
@@ -240,6 +248,8 @@ export function checkIsFreeDelivery(
  * - Outside Dhaka: ৳150
  */
 export function calculateShippingFee({
+  division,
+  district,
   city,
   address,
   zoneName,
@@ -259,43 +269,18 @@ export function calculateShippingFee({
     };
   }
 
-  const cityText = (city || '').trim();
-  const addrText = (address || '').trim();
-  const zoneText = (zoneName || '').trim();
-  const areaText = (areaName || '').trim();
+  // Combine all location indicators to parse address with typo tolerance
+  const combined = [address, district, city, division, zoneName, areaName]
+    .filter(Boolean)
+    .join(' ');
 
-  // Check if City is Dhaka (or address text explicitly mentions Dhaka city)
-  const isDhaka = isDhakaCity(cityText) || isDhakaCity(addrText);
+  const parsed = parseAddressLocation(combined);
 
-  if (isDhaka) {
-    // Dhaka Sub-area (৳120): Triggers if city, address, zone, or area matches sub-area keywords (EN or BN).
-    // If address text is explicitly entered by customer, sub-area tier is evaluated directly against city and address text.
-    const isSubInCityOrAddr = isDhakaSubArea(cityText) || isDhakaSubArea(addrText);
-    const isSubInZoneOrArea = isDhakaSubArea(zoneText) || isDhakaSubArea(areaText);
-
-    const isSub = addrText ? isSubInCityOrAddr : (isSubInCityOrAddr || isSubInZoneOrArea);
-
-    if (isSub) {
-      return {
-        fee: 100,
-        tier: 'dhaka_subarea',
-        reason: 'Dhaka Sub-area (Savar, Ashulia, Keraniganj, Gazipur, Tongi, Narayanganj, Dhamrai)',
-      };
-    }
-
-    // Inside Dhaka Core (৳80)
-    return {
-      fee: 80,
-      tier: 'dhaka_core',
-      reason: 'Inside Dhaka Core',
-    };
-  }
-
-  // Outside Dhaka (৳150)
   return {
-    fee: 150,
-    tier: 'outside_dhaka',
-    reason: 'Outside Dhaka',
+    fee: parsed.rate,
+    tier: parsed.tier,
+    reason: parsed.badgeLabelBn,
   };
 }
+
 

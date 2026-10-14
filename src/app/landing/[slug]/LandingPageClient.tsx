@@ -46,6 +46,9 @@ import {
   KeyRound,
   Mail,
   Sparkles,
+  Info,
+  FileText,
+  Palette,
 } from 'lucide-react';
 import { Product, ProductColor } from '@/data/products';
 import { formatCurrency } from '@/lib/utils';
@@ -53,6 +56,62 @@ import { useCart } from '@/context/CartContext';
 import { useAnalytics } from '@/context/AnalyticsContext';
 import { useToast } from '@/components/ui/Toast';
 import { getYouTubeEmbedUrl, isYouTubeUrl } from '@/lib/videoUtils';
+import {
+  parseAddressLocation,
+  calculateShippingFee,
+  checkIsFreeDelivery,
+} from '@/lib/shipping/locationBilingual';
+
+/** Shared 44px-touch-target text field matching checkout style. */
+function Field({
+  label,
+  name,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+  required = true,
+  autoComplete,
+  inputMode,
+  pattern,
+  maxLength,
+  className = '',
+}: {
+  label: string;
+  name: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  type?: string;
+  required?: boolean;
+  autoComplete?: string;
+  inputMode?: 'text' | 'tel' | 'numeric' | 'email';
+  pattern?: string;
+  maxLength?: number;
+  className?: string;
+}) {
+  return (
+    <div className={`space-y-1.5 ${className}`}>
+      <label htmlFor={`lp-${name}`} className="text-[11px] sm:text-xs font-bold text-stone-700">
+        {label} {required && <span className="text-[#A80C14]">*</span>}
+      </label>
+      <input
+        id={`lp-${name}`}
+        type={type}
+        name={name}
+        required={required}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        inputMode={inputMode}
+        pattern={pattern}
+        maxLength={maxLength}
+        className="w-full min-h-[44px] px-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs sm:text-sm text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#A80C14] focus:border-transparent transition-shadow"
+      />
+    </div>
+  );
+}
 
 interface LandingPageClientProps {
   initialProduct: Product;
@@ -60,7 +119,7 @@ interface LandingPageClientProps {
 
 export default function LandingPageClient({ initialProduct }: LandingPageClientProps) {
   const router = useRouter();
-  const { placeOrder, deliveryZones, products } = useCart();
+  const { placeOrder, deliveryZones, products, freeShippingThreshold } = useCart();
   const { trackEvent } = useAnalytics();
   const { showToast } = useToast();
 
@@ -235,10 +294,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
   }, [avgRatingNum]);
 
   const [quantity, setQuantity] = useState<number>(1);
-  const [deliveryArea, setDeliveryArea] = useState<'inside' | 'outside'>('inside');
-  const deliveryFee = deliveryArea === 'inside' ? 70 : 130;
   const subtotal = offerPrice * quantity;
-  const totalPayable = subtotal + deliveryFee;
 
   // ─── Video Control State & YouTube Detection ──────────────────────────────
   const isYouTube = useMemo(() => isYouTubeUrl(product.videoUrl), [product.videoUrl]);
@@ -318,6 +374,38 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [orderSuccess, setOrderSuccess] = useState<any | null>(null);
+  const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
+
+  // ── Smart Bilingual Address Parsing with Zero Mismatch Guarantee ─────────────
+  const parsedAddress = useMemo(() => {
+    return parseAddressLocation(address);
+  }, [address]);
+
+  const activeTier = parsedAddress.tier;
+
+  const isFreeDeliveryUnlocked = useMemo(() => {
+    return checkIsFreeDelivery(
+      [{ product, quantity }],
+      subtotal,
+      Number(freeShippingThreshold)
+    );
+  }, [product, quantity, subtotal, freeShippingThreshold]);
+
+  const effectiveShippingFee = isFreeDeliveryUnlocked ? 0 : parsedAddress.rate;
+  const deliveryFee = effectiveShippingFee;
+  const totalPayable = subtotal + deliveryFee;
+
+  // Close policy modal on Escape key
+  useEffect(() => {
+    if (!isPolicyModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPolicyModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPolicyModalOpen]);
 
   // Authentication & session state
   const [sessionUser, setSessionUser] = useState<any | null>(null);
@@ -408,12 +496,16 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           fullName: cleanName,
           phone: digitsOnly,
           fullAddress: cleanAddress,
-          district: deliveryArea === 'inside' ? 'Dhaka City' : 'Outside Dhaka',
-          city: deliveryArea === 'inside' ? 'Dhaka' : 'Outside Dhaka',
+          district: parsedAddress.districtNameEn || (activeTier === 'dhaka_core' ? 'Dhaka City' : activeTier === 'dhaka_subarea' ? 'Dhaka Sub-area' : 'Outside Dhaka'),
+          city: parsedAddress.districtNameEn || (activeTier === 'dhaka_core' ? 'Dhaka' : 'Outside Dhaka'),
         },
-        deliveryMethod: deliveryArea === 'inside' ? 'Inside Dhaka (৳70)' : 'Outside Dhaka (৳130)',
+        deliveryMethod: activeTier === 'dhaka_core'
+          ? 'Inside Dhaka (৳80)'
+          : activeTier === 'dhaka_subarea'
+          ? 'Sub-area Dhaka (৳100)'
+          : 'Outside Dhaka (৳150)',
         paymentMethod: 'Cash on Delivery',
-        deliveryZone: deliveryArea === 'inside' ? 'inside_dhaka' : 'outside_dhaka',
+        deliveryZone: activeTier,
         paymentStatus: 'Pending',
         userEmail: effectiveEmail,
         userId: activeUser?.id,
@@ -593,7 +685,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           phone: digitsOnly,
           email: authEmail.trim() || undefined,
           password: authPassword,
-          district: deliveryArea === 'inside' ? 'Dhaka' : 'Outside Dhaka',
+          district: parsedAddress.districtNameEn || (activeTier === 'dhaka_core' ? 'Dhaka' : 'Outside Dhaka'),
           fullAddress: cleanAddress,
         }),
       });
@@ -656,7 +748,11 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             <div className="flex justify-between items-center">
               <span className="text-stone-500 font-medium">Delivery Zone:</span>
               <span className="font-bold text-stone-800">
-                {deliveryArea === 'inside' ? 'Inside Dhaka (৳70)' : 'Outside Dhaka (৳130)'}
+                {activeTier === 'dhaka_core'
+                  ? 'Inside Dhaka (৳80)'
+                  : activeTier === 'dhaka_subarea'
+                  ? 'Sub-area Dhaka (৳100)'
+                  : 'Outside Dhaka (৳150)'}
               </span>
             </div>
             <div className="flex justify-between items-center">
@@ -1293,11 +1389,10 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 {[...Array(5)].map((_, i) => (
                   <Star
                     key={i}
-                    className={`w-4 h-4 ${
-                      i < Math.round(avgRatingNum)
-                        ? 'fill-amber-400 text-amber-400'
-                        : 'text-stone-300 fill-stone-100'
-                    }`}
+                    className={`w-4 h-4 ${i < Math.round(avgRatingNum)
+                      ? 'fill-amber-400 text-amber-400'
+                      : 'text-stone-300 fill-stone-100'
+                      }`}
                   />
                 ))}
                 <span className="font-bold text-stone-900 text-xs ml-1 font-mono">
@@ -1521,103 +1616,129 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   </div>
                 )}
 
-                <div className="space-y-3.5">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-600 mb-1">
-                      YOUR FULL NAME
-                    </label>
-                    <input
-                      type="text"
-                      required
+                {/* Shipping & Contact Details */}
+                <div className="bg-white p-4 sm:p-6 rounded-3xl border border-[#F8D2D5] shadow-xs space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <h2 className="font-bold text-base sm:text-lg text-stone-900 flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-full bg-[#A80C14]/10 text-[#A80C14] text-xs font-black flex items-center justify-center shrink-0">
+                        2
+                      </span>
+                      Shipping &amp; Contact Details
+                    </h2>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                    <Field
+                      label="Full Name"
+                      name="fullName"
                       value={fullName}
                       onChange={(e) => {
                         setFullName(e.target.value);
                         if (formError) setFormError('');
                       }}
-                      placeholder="Your Full Name"
-                      className="w-full text-xs sm:text-sm px-4 py-3 bg-[#FAF6F4] border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
+                      placeholder="e.g. Sarah Ahmed"
+                      autoComplete="name"
                     />
-                  </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-600 mb-1">
-                      PHONE NUMBER
-                    </label>
-                    <input
+                    <Field
+                      label="Phone Number"
+                      name="phone"
                       type="tel"
-                      required
                       value={phone}
                       onChange={(e) => {
                         setPhone(e.target.value);
                         if (formError) setFormError('');
                       }}
-                      placeholder="Phone Number (01XXXXXXXXX)"
-                      className="w-full text-xs sm:text-sm px-4 py-3 bg-[#FAF6F4] border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020] font-mono"
+                      placeholder="e.g. 01700000000"
+                      autoComplete="tel-national"
+                      inputMode="tel"
+                      pattern="01[0-9]{9}"
+                      maxLength={11}
                     />
+
+                    {/* Unified Single Full Address Field (Division, District, Full Address combined) */}
+                    <div className="sm:col-span-2 space-y-2">
+                      <Field
+                        label="Full Address / সম্পূর্ণ ঠিকানা (District, Thana/Area, Road/House)"
+                        name="street"
+                        value={address}
+                        onChange={(e) => {
+                          setAddress(e.target.value);
+                          if (formError) setFormError('');
+                        }}
+                        placeholder="e.g. বাড়ি ১২, রোড ৪, ধানমন্ডি, ঢাকা অথবা গ্রাম, থানা, জেলা (যেমন: পাবনা / সাভার / চট্টগ্রাম)"
+                        autoComplete="street-address"
+                        required
+                        className="w-full"
+                      />
+
+                      {/* Real-time Location Detection & Rate Status Badge */}
+                      {parsedAddress.isRecognized ? (
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-900 transition-all shadow-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                            <span className="font-semibold truncate">{parsedAddress.badgeLabelBn}</span>
+                          </div>
+                          <span className="font-bold text-[#A80C14] bg-white px-2.5 py-0.5 rounded-lg border border-rose-100 shadow-xs shrink-0 ml-2">
+                            {effectiveShippingFee === 0 ? 'ফ্রি ডেলিভারি' : `৳ ${effectiveShippingFee}`}
+                          </span>
+                        </div>
+                      ) : address.trim() ? (
+                        <div className="flex items-center gap-1.5 text-[11px] text-stone-500 px-1">
+                          <Info className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                          <span>ঠিকানায় জেলা বা এলাকার নাম লিখলে ডেলিভারি চার্জ স্বয়ংক্রিয়ভাবে নির্ধারিত হবে (যেমন: পাবনা, সাভার, মিরপুর)।</span>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-600 mb-1">
-                      FULL ADDRESS (House No, Area, Thana, District)
-                    </label>
-                    <textarea
-                      required
-                      rows={2}
-                      value={address}
-                      onChange={(e) => {
-                        setAddress(e.target.value);
-                        if (formError) setFormError('');
-                      }}
-                      placeholder="Full Address (House No, Area, Thana, District)"
-                      className="w-full text-xs sm:text-sm px-4 py-3 bg-[#FAF6F4] border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
-                    />
-                  </div>
-
-                  {/* Delivery Area Selector (Radio group) */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-600 mb-2">
-                      DELIVERY ZONE:
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <label
-                        onClick={() => setDeliveryArea('inside')}
-                        className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${deliveryArea === 'inside'
-                          ? 'border-[#800020] bg-[#FDF2F3] ring-1 ring-[#800020]'
-                          : 'border-stone-200 bg-[#FAF6F4] hover:bg-stone-100'
-                          }`}
+                  {/* Delivery Fee Info Banner with Active Tier Highlight */}
+                  <div className="p-3.5 bg-rose-50/60 border border-[#F8D2D5] rounded-2xl text-xs text-stone-700 space-y-2">
+                    <div className="flex items-center justify-between font-bold text-stone-900 flex-wrap gap-1">
+                      <span className="flex items-center gap-1.5 text-[#A80C14]">
+                        <Truck className="w-4 h-4" /> Standard Delivery Rates
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setIsPolicyModalOpen(true)}
+                          className="text-[11px] text-[#A80C14] hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Info className="w-3.5 h-3.5" /> শর্তাবলী দেখুন
+                        </button>
+                        <span className="font-mono font-bold text-xs text-[#A80C14]">
+                          {effectiveShippingFee === 0 ? 'Free Shipping' : `৳ ${effectiveShippingFee}`}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                      <span
+                        className={`px-2 py-0.5 rounded-md transition-colors ${
+                          parsedAddress.tier === 'dhaka_core' && parsedAddress.isRecognized
+                            ? 'bg-[#A80C14] text-white font-bold shadow-xs'
+                            : 'text-stone-600 bg-white/70 border border-[#F8D2D5]'
+                        }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            name="delivery_zone"
-                            checked={deliveryArea === 'inside'}
-                            onChange={() => setDeliveryArea('inside')}
-                            className="text-[#800020] focus:ring-[#800020]"
-                          />
-                          <span className="text-xs font-bold text-stone-800">Inside Dhaka</span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-[#800020]">৳70</span>
-                      </label>
-
-                      <label
-                        onClick={() => setDeliveryArea('outside')}
-                        className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${deliveryArea === 'outside'
-                          ? 'border-[#800020] bg-[#FDF2F3] ring-1 ring-[#800020]'
-                          : 'border-stone-200 bg-[#FAF6F4] hover:bg-stone-100'
-                          }`}
+                        Inside Dhaka: <strong>৳80</strong>
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md transition-colors ${
+                          parsedAddress.tier === 'dhaka_subarea' && parsedAddress.isRecognized
+                            ? 'bg-[#A80C14] text-white font-bold shadow-xs'
+                            : 'text-stone-600 bg-white/70 border border-[#F8D2D5]'
+                        }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            name="delivery_zone"
-                            checked={deliveryArea === 'outside'}
-                            onChange={() => setDeliveryArea('outside')}
-                            className="text-[#800020] focus:ring-[#800020]"
-                          />
-                          <span className="text-xs font-bold text-stone-800">Outside Dhaka</span>
-                        </div>
-                        <span className="font-mono text-xs font-bold text-[#800020]">৳130</span>
-                      </label>
+                        Sub-area Dhaka: <strong>৳100</strong>
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md transition-colors ${
+                          (parsedAddress.tier === 'outside_dhaka' || !parsedAddress.isRecognized) && effectiveShippingFee === 150
+                            ? 'bg-[#A80C14] text-white font-bold shadow-xs'
+                            : 'text-stone-600 bg-white/70 border border-[#F8D2D5]'
+                        }`}
+                      >
+                        Outside Dhaka: <strong>৳150</strong>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1672,60 +1793,138 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
 
       {/* 2. Footer Columns */}
       <footer className="bg-[#1C1917] text-stone-300 text-xs pt-12 pb-8 px-4 sm:px-6 lg:px-8 mt-8 border-t border-stone-800">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-4 gap-8 pb-8 border-b border-stone-800 text-left">
-          {/* Brand Column */}
-          <div className="space-y-3 sm:col-span-1">
-            <p className="font-serif font-black text-xl text-white">
-              Hijab <span className="text-[#E29FB6]">House</span>
+        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 lg:gap-8 pb-10 border-b border-stone-800 text-left">
+          {/* Brand Column (lg:col-span-2) */}
+          <div className="lg:col-span-2 space-y-4">
+            <Link href="/" className="group inline-flex items-center cursor-pointer">
+              <div className="relative inline-flex items-center shrink-0">
+                <Image
+                  src="/Logo.jpg"
+                  alt="Falak Closet Logo"
+                  width={48}
+                  height={48}
+                  className="h-10 sm:h-12 max-w-[180px] rounded-md w-auto object-contain transition-transform duration-300 group-hover:scale-105"
+                />
+              </div>
+              <span className="mx-2 font-bold text-white text-base tracking-wide group-hover:text-[#E29FB6] transition-colors">
+                Falak Closet
+              </span>
+            </Link>
+            <p className="text-xs text-stone-400 leading-relaxed max-w-sm">
+              Falak Closet is your destination for handcrafted luxury abayas, silk hijabs, kaftans, dresses, and modest couture collections.
             </p>
-            <p className="text-stone-400 text-[11px] leading-relaxed">
-              Curated luxury modest fashion and hijabs crafted for every special and everyday moment.
-            </p>
+
+            {/* Value Badges */}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] font-bold shadow-xs">
+                <Truck className="w-3.5 h-3.5 shrink-0" />
+                <span>Fast Delivery</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] font-bold shadow-xs">
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>All Active</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] font-bold shadow-xs">
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span>Modest style</span>
+              </span>
+            </div>
+
+            {/* Social Links */}
+            <div className="pt-2 flex items-center gap-2">
+              <a
+                href="https://instagram.com/falak_closet"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Instagram"
+                title="Instagram"
+                className="group p-2.5 bg-[#FDF2F3] hover:bg-[#A80C14] text-[#A80C14] hover:text-white rounded-full transition-colors border border-[#F8D2D5]/80 flex items-center justify-center cursor-pointer"
+              >
+                <svg className="w-5 h-5 fill-current transition-colors" viewBox="0 0 24 24">
+                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+                </svg>
+              </a>
+              <a
+                href="https://www.facebook.com/falak.closet"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Facebook"
+                title="Facebook"
+                className="group p-2.5 bg-[#FDF2F3] hover:bg-[#A80C14] text-[#A80C14] hover:text-white rounded-full transition-colors border border-[#F8D2D5]/80 flex items-center justify-center cursor-pointer"
+              >
+                <svg className="w-5 h-5 fill-current transition-colors" viewBox="0 0 24 24">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                </svg>
+              </a>
+              <a
+                href="https://wa.me/01889020503"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="WhatsApp"
+                title="WhatsApp"
+                className="group p-2.5 bg-[#FDF2F3] hover:bg-[#A80C14] text-[#A80C14] hover:text-white rounded-full transition-colors border border-[#F8D2D5]/80 flex items-center justify-center cursor-pointer"
+              >
+                <svg className="w-5 h-5 fill-current transition-colors" viewBox="0 0 24 24">
+                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
+                </svg>
+              </a>
+            </div>
           </div>
 
-          {/* Company Links */}
-          <div className="space-y-2">
-            <p className="font-bold text-white text-xs uppercase tracking-wider">Company</p>
-            <ul className="space-y-1.5 text-[11px] text-stone-400">
-              <li><Link href="/about" className="hover:text-white">About Us</Link></li>
-              <li><Link href="/returns" className="hover:text-white">Return Policy</Link></li>
-              <li><Link href="/privacy" className="hover:text-white">Privacy Policy</Link></li>
-              <li><Link href="/terms" className="hover:text-white">Terms of Service</Link></li>
+          {/* Contact Info Col */}
+          <div className="space-y-3">
+            <p className="font-bold text-[#E29FB6] text-xs uppercase tracking-wider">Contact</p>
+            <div className="space-y-2.5 text-[11px] text-stone-400">
+              <div className="flex items-start gap-2">
+                <MapPin className="w-4 h-4 text-[#E29FB6] shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-white uppercase block text-[9px] tracking-wider">Dhaka</strong>
+                  <span>Mirpur Dhaka</span>
+                </div>
+              </div>
+              <a href="tel:01889020503" className="flex items-center gap-2 hover:text-white transition-colors">
+                <Phone className="w-4 h-4 text-[#E29FB6] shrink-0" />
+                <span>01889020503</span>
+              </a>
+              <a href="mailto:info@falakcloset.com" className="flex items-center gap-2 hover:text-white transition-colors">
+                <Mail className="w-4 h-4 text-[#E29FB6] shrink-0" />
+                <span>info@falakcloset.com</span>
+              </a>
+            </div>
+          </div>
+
+          {/* Account Links */}
+          <div className="space-y-3">
+            <p className="font-bold text-[#E29FB6] text-xs uppercase tracking-wider">Account</p>
+            <ul className="space-y-2 text-[11px] text-stone-400">
+              <li><Link href="/account" className="hover:text-white transition-colors">My profile</Link></li>
+              <li><Link href="/account" className="hover:text-white transition-colors">Order history</Link></li>
+              <li><Link href="/track" className="hover:text-white transition-colors">Track order</Link></li>
+              <li><Link href="/cart" className="hover:text-white transition-colors">Cart</Link></li>
             </ul>
           </div>
 
-          {/* Quick Links */}
-          <div className="space-y-2">
-            <p className="font-bold text-white text-xs uppercase tracking-wider">Shopping</p>
-            <ul className="space-y-1.5 text-[11px] text-stone-400">
-              <li><Link href="/shop" className="hover:text-white">All Hijabs</Link></li>
-              <li><Link href="/how-to-order" className="hover:text-white">How to Order</Link></li>
-              <li><Link href="/track" className="hover:text-white">Track Order</Link></li>
-              <li><Link href="/account" className="hover:text-white">My Account</Link></li>
-            </ul>
-          </div>
-
-          {/* Contact Info */}
-          <div className="space-y-2">
-            <p className="font-bold text-white text-xs uppercase tracking-wider">Contact Info</p>
-            <ul className="space-y-1.5 text-[11px] text-stone-400">
-              <li>Hotline: +880 1799-775487</li>
-              <li>WhatsApp: +880 1799-775487</li>
-              <li>Hours: 10:00 AM – 10:00 PM</li>
-              <li>Dhaka, Bangladesh</li>
+          {/* Help Links */}
+          <div className="space-y-3">
+            <p className="font-bold text-[#E29FB6] text-xs uppercase tracking-wider">Help</p>
+            <ul className="space-y-2 text-[11px] text-stone-400">
+              <li><Link href="/shipping" className="hover:text-white transition-colors">Delivery charge</Link></li>
+              <li><Link href="/returns" className="hover:text-white transition-colors">Refunds &amp; exchange</Link></li>
+              <li><Link href="/terms" className="hover:text-white transition-colors">Terms</Link></li>
+              <li><Link href="/privacy" className="hover:text-white transition-colors">Privacy</Link></li>
             </ul>
           </div>
         </div>
 
-        <div className="max-w-5xl mx-auto pt-6 border-t border-stone-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-stone-400">
-          <p>© {new Date().getFullYear()} FALAK CLOSET. All Rights Reserved.</p>
-          <p className="text-center sm:text-right">
-            Design &amp; Development by{' '}
+        <div className="max-w-5xl mx-auto pt-6 border-t border-stone-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-stone-500 text-center sm:text-left">
+          <p>© {new Date().getFullYear()} <strong className="font-semibold text-stone-300">FALAK CLOSET</strong>. All Rights Reserved.</p>
+          <p className="flex items-center gap-1.5">
+            <span>Design &amp; Development by</span>
             <a
               href="https://brightfuturesoft.com/?ref=falakcloset"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-stone-200 font-bold hover:text-white underline decoration-stone-400 hover:decoration-white transition-colors cursor-pointer"
+              className="text-[#E29FB6] font-bold hover:underline transition-colors cursor-pointer"
             >
               Bright Future Soft
             </a>
@@ -1950,11 +2149,10 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     />
                     {authConfirmPassword && (
                       <p
-                        className={`text-[10px] font-bold mt-1 ${
-                          authPassword === authConfirmPassword
-                            ? 'text-emerald-600'
-                            : 'text-rose-600'
-                        }`}
+                        className={`text-[10px] font-bold mt-1 ${authPassword === authConfirmPassword
+                          ? 'text-emerald-600'
+                          : 'text-rose-600'
+                          }`}
                       >
                         {authPassword === authConfirmPassword
                           ? '✓ Passwords match'
@@ -1995,6 +2193,181 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   </div>
                 </form>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delivery & Order Policy Modal */}
+      {isPolicyModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/65 backdrop-blur-xs animate-in fade-in duration-200"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Delivery and Order Policy"
+          onClick={(e) => e.target === e.currentTarget && setIsPolicyModalOpen(false)}
+        >
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl border border-stone-200 max-w-xl w-full shadow-2xl overflow-hidden text-stone-900 flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#A80C14] to-[#8C0A10] text-white p-4 sm:p-5 text-left relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsPolicyModalOpen(false)}
+                aria-label="Close policy modal"
+                className="absolute top-3.5 right-3.5 w-8 h-8 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-white/15 backdrop-blur-xs flex items-center justify-center shrink-0">
+                  <FileText className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base sm:text-lg leading-tight">
+                    ডেলিভারি ও অর্ডার নিয়মাবলী
+                  </h3>
+                  <p className="text-[11px] text-rose-100/90 font-medium">
+                    Falak Closet — Order &amp; Delivery Policy
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Content - Scrollable Organized Sections */}
+            <div className="p-4 sm:p-6 space-y-4 overflow-y-auto overscroll-contain flex-grow text-xs leading-relaxed divide-y divide-stone-100">
+              {/* 1. Cash on Delivery Condition */}
+              <div className="space-y-2 pt-1 first:pt-0">
+                <div className="flex items-center gap-2 font-extrabold text-stone-900 text-sm">
+                  <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 text-xs flex items-center justify-center shrink-0">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                  </span>
+                  <span>ক্যাশ অন ডেলিভারি (Cash on Delivery)</span>
+                </div>
+                <div className="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl text-emerald-900 font-semibold leading-relaxed">
+                  ৮০% সফলভাবে ডেলিভারী নেওয়ার রেকর্ড থাকলে ক্যাশ অন ডেলিভারী পাবেন, না থাকলে ডেলিভারী চার্জ এডভান্স করে প্রোডাক্ট নিতে হবে।
+                </div>
+              </div>
+
+              {/* 2. Delivery Fee Rates */}
+              <div className="space-y-2 pt-4">
+                <div className="flex items-center gap-2 font-extrabold text-stone-900 text-sm">
+                  <span className="w-6 h-6 rounded-lg bg-rose-100 text-[#A80C14] text-xs flex items-center justify-center shrink-0">
+                    <Truck className="w-3.5 h-3.5" />
+                  </span>
+                  <span>ডেলিভারি চার্জ (Delivery Charges)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="p-3 bg-stone-50 border border-stone-200/80 rounded-2xl text-center space-y-0.5">
+                    <span className="block text-[10px] text-stone-500 font-semibold">ঢাকার মধ্যে</span>
+                    <span className="block font-black text-sm text-[#A80C14]">৳ ৮০</span>
+                  </div>
+                  <div className="p-3 bg-stone-50 border border-stone-200/80 rounded-2xl text-center space-y-0.5">
+                    <span className="block text-[10px] text-stone-500 font-semibold">ঢাকার পাশ্ববর্তী এরিয়া</span>
+                    <span className="block font-black text-sm text-[#A80C14]">৳ ১০০</span>
+                  </div>
+                  <div className="p-3 bg-stone-50 border border-stone-200/80 rounded-2xl text-center space-y-0.5">
+                    <span className="block text-[10px] text-stone-500 font-semibold">ঢাকার বাহিরে</span>
+                    <span className="block font-black text-sm text-[#A80C14]">৳ ১৫০</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Order Confirmation & Delivery Process */}
+              <div className="space-y-2 pt-4">
+                <div className="flex items-center gap-2 font-extrabold text-stone-900 text-sm">
+                  <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 text-xs flex items-center justify-center shrink-0">
+                    <PhoneCall className="w-3.5 h-3.5" />
+                  </span>
+                  <span>অর্ডার প্রসেসিং ও কনফার্মেশন</span>
+                </div>
+                <ul className="space-y-2 text-stone-700 font-medium pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>নাম, ফোন নম্বর ও ঠিকানা দিয়ে অর্ডার কনফার্ম করুন।</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">🍂</span>
+                    <span>আমাদের সব পণ্যের দাম ফিক্সড।</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>পেইজ থেকে কনফার্মেশন কল দেওয়া হবে। কনফার্মেশন কলটি রিসিভ করার পর পার্সেলটি পাঠানো হবে।</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>কলে কনফার্ম করার পর অর্ডার ক্যান্সেল বা চেঞ্জ করা হয় না।</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>কনফার্মেশন কল পাওয়ার পর ২-৩ দিনে পার্সেল পাবেন।</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* 4. Color & Display Disclaimer */}
+              <div className="space-y-2 pt-4">
+                <div className="flex items-center gap-2 font-extrabold text-stone-900 text-sm">
+                  <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-800 text-xs flex items-center justify-center shrink-0">
+                    <Palette className="w-3.5 h-3.5" />
+                  </span>
+                  <span>কালার সংক্রান্ত নোটিশ (Color Disclaimer)</span>
+                </div>
+                <div className="p-3 bg-purple-50/70 border border-purple-200/80 rounded-2xl text-purple-900 font-medium">
+                  ক্যামেরা এবং ফোনের ডিসপ্লে এর ভিন্নতার জন্যে কালার লাইট কিংবা ডিপ দেখা যেতে পারে।
+                </div>
+              </div>
+
+              {/* 5. Return & Parcel Checking Policy */}
+              <div className="space-y-2 pt-4">
+                <div className="flex items-center gap-2 font-extrabold text-stone-900 text-sm">
+                  <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-800 text-xs flex items-center justify-center shrink-0">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </span>
+                  <span>পার্সেল চেক ও রিটার্ন পলিসি</span>
+                </div>
+                <ul className="space-y-2 text-stone-700 font-medium pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>ডেলিভারী ম্যানের সামনে পার্সেল চেক করে নিবেন।</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>আমাদের পার্সেল রিটার্ন করতে হলে সম্পূর্ণ পার্সেল রিটার্ন করে দিবেন ডেলিভারী খরচ দিয়ে।</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>আমাদের পেইজ থেকে কোনো পার্সিয়াল ডেলিভারী দেওয়া হয় না।</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span>পার্সেলটি রিসিভ করার পর আমাদের পেইজ থেকে রিটার্ন নেওয়া হয় না।</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Accordion showing verbatim full prompt message text */}
+              <div className="pt-4">
+                <details className="bg-stone-50 border border-stone-200 rounded-2xl overflow-hidden group">
+                  <summary className="p-3 font-bold text-stone-700 text-[11px] cursor-pointer flex items-center justify-between group-open:border-b group-open:border-stone-200">
+                    <span>মূল নোটিশের সম্পূর্ণ টেক্সট (Full Policy Text)</span>
+                    <ChevronDown className="w-4 h-4 text-stone-400 group-open:rotate-180 transition-transform" />
+                  </summary>
+                  <div className="p-3.5 text-[11px] text-stone-600 leading-relaxed font-sans bg-white border-t border-stone-100">
+                    &quot;৮০% সফলভাবে ডেলিভারী নেওয়ার রেকর্ড থাকলে ক্যাশ অন ডেলিভারী পাবেন, না থাকলে ডেলিভারী চার্জ এডভান্স করে প্রোডাক্ট নিতে হবে। ঢাকা মধ্যে ডেলিভারি চার্জ ৮০ টাকা, ঢাকার পাশ্ববর্তী এরিয়া ১০০ টাকা এবং ঢাকার বাহিরে ১৫০ টাকা। নাম ফোন নম্বার ঠিকানা দিয়ে অর্ডার কনফার্ম করুন। ক্যামেরা এবং ফোনের ডিস্প্লে এর ভিন্যতার জন্যে কালার লাইট কিংবা ডিপ দেখা যেতে পারে। 🍂আমাদের সব পণ্যের দাম ফিক্সড পেইজ থেকে কনফার্মেশন কল দেওয়া হবে।কনফার্মেশন কলটি রিসিভ করার পর পার্সেলটি পাঠানো হবে। কলে কানফার্ম করার পর অর্ডার ক্যান্সেল বা চেন্জ করা হয় না। কনফার্মেশন কল পাওয়ার পর ২-৩ দিনে পার্সেল পাবেন। ডেলিভারী ম্যানের সামনে পার্সেল চেক করে নিবেন। আমাদের পার্সেল রিটার্ন করতে হলে সম্পূর্ণ পার্সেল রিটার্ন করে দিবেন ডেলিভারী  খরচ দিয়ে। আমাদের পেইজ থেকে কোনো পার্সিয়াল ডেলিভারী দেওয়া হয় না। পার্সেলটি রিসিভ করার পর আমাদের পেইজ থেকে রিটার্ন নেওয়া হয় না।&quot;
+                  </div>
+                </details>
+              </div>
+            </div>
+
+            {/* Modal Sticky Footer */}
+            <div className="p-4 bg-stone-50 border-t border-stone-200 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsPolicyModalOpen(false)}
+                className="w-full sm:w-auto min-h-[44px] px-6 bg-[#A80C14] hover:bg-[#8C0A10] active:scale-95 text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>বুঝেছি, অর্ডার সম্পন্ন করুন</span>
+              </button>
             </div>
           </div>
         </div>

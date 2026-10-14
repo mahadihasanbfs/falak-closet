@@ -23,6 +23,8 @@ export interface VariationDisplayItem {
 interface VariationCardProps {
   item: VariationDisplayItem;
   product: Product;
+  isSelected?: boolean;
+  onSelect?: (item: VariationDisplayItem) => void;
   onAddToCart: (item: VariationDisplayItem) => void;
   onBuyNow: (item: VariationDisplayItem) => void;
   onOpenZoom: (item: VariationDisplayItem) => void;
@@ -31,6 +33,8 @@ interface VariationCardProps {
 export function VariationCard({
   item,
   product,
+  isSelected,
+  onSelect,
   onAddToCart,
   onBuyNow,
   onOpenZoom,
@@ -50,7 +54,14 @@ export function VariationCard({
   const cartQuantity = cartItem ? cartItem.quantity : 0;
 
   return (
-    <div className="group bg-white rounded-2xl border border-stone-200/90 shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden flex flex-col justify-between hover:border-pink-200">
+    <div
+      onClick={() => onSelect?.(item)}
+      className={`group bg-white rounded-2xl border transition-all duration-300 overflow-hidden flex flex-col justify-between cursor-pointer ${
+        isSelected
+          ? 'border-[#A80C14] ring-2 ring-[#A80C14]/25 shadow-md -translate-y-0.5'
+          : 'border-stone-200/90 shadow-sm hover:shadow-xl hover:border-pink-300'
+      }`}
+    >
       {/* Image Section */}
       <div className="relative aspect-[4/5] bg-stone-100 overflow-hidden">
         <SmartImage
@@ -61,9 +72,24 @@ export function VariationCard({
           className="object-cover group-hover:scale-105 transition-transform duration-500"
         />
 
+        {/* Selected or Select Indicator Badge */}
+        {isSelected ? (
+          <span className="absolute top-2.5 left-2.5 z-10 px-2 py-0.5 rounded-full bg-[#A80C14] text-white text-[10px] font-bold shadow-sm flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            Selected
+          </span>
+        ) : (
+          <span className="absolute top-2.5 left-2.5 z-10 px-2 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-medium backdrop-blur-xs opacity-0 group-hover:opacity-100 transition-opacity">
+            Select
+          </span>
+        )}
+
         {/* Zoom Modal Button */}
         <button
-          onClick={() => onOpenZoom(item)}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenZoom(item);
+          }}
           className="absolute top-2.5 right-2.5 p-1.5 bg-white/90 hover:bg-white text-stone-700 hover:text-stone-900 rounded-full shadow-md backdrop-blur-sm transition-all active:scale-90 opacity-90 group-hover:opacity-100 cursor-pointer z-10"
           title="Zoom variation image"
           aria-label="Zoom variation image"
@@ -84,7 +110,9 @@ export function VariationCard({
                 title={item.colorName}
               />
             )}
-            <h3 className="font-semibold text-stone-900 text-xs sm:text-sm line-clamp-1 group-hover:text-pink-600 transition-colors">
+            <h3 className={`font-semibold text-xs sm:text-sm line-clamp-1 transition-colors ${
+              isSelected ? 'text-[#A80C14]' : 'text-stone-900 group-hover:text-[#A80C14]'
+            }`}>
               {item.colorName}
               {item.size && item.size !== 'Free Size' ? ` (${item.size})` : ''}
             </h3>
@@ -106,7 +134,7 @@ export function VariationCard({
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-medium text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200/60">
-                <XCircle className="w-3 h-3 text-rose-500" />
+                <XCircle className="w-3.5 h-3.5 text-rose-500" />
                 Out of Stock
               </span>
             )}
@@ -118,7 +146,10 @@ export function VariationCard({
         </div>
 
         {/* Action Buttons & Quantity Controller */}
-        <div className="pt-2 mt-2 border-t border-stone-100 flex items-center justify-between gap-1.5">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="pt-2 mt-2 border-t border-stone-100 flex items-center justify-between gap-1.5"
+        >
           {cartQuantity > 0 ? (
             /* Full-width Quantity Controller (when item is in cart — hides Buy Now) */
             <div className="w-full flex items-center justify-between bg-[#FDF2F3] border border-[#F8D2D5] rounded-full px-2 py-1 shadow-2xs">

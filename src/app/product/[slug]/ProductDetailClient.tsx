@@ -37,13 +37,34 @@ import { useAnalytics } from '@/context/AnalyticsContext';
 import { useToast } from '@/components/ui/Toast';
 import { getProductSchema, getBreadcrumbSchema } from '@/lib/schema';
 import { ProductZoomModal } from '@/components/product/ProductZoomModal';
-import { ProductVariationsGrid } from '@/components/product/ProductVariationsGrid';
+import { ProductVariationsGrid, type VariationDisplayItem } from '@/components/product/ProductVariationsGrid';
 import { ProductSummarySidebar } from '@/components/product/ProductSummarySidebar';
 import { ProductGallery } from '@/components/product/ProductGallery';
 import { MobileProductBottomBar } from '@/components/product/MobileProductBottomBar';
 import { AuthModal } from '@/components/ui/AuthModal';
 
+function fastScrollTo(targetY: number, durationMs = 260) {
+  if (typeof window === 'undefined') return;
+  const startY = window.pageYOffset;
+  const diff = targetY - startY;
+  if (Math.abs(diff) < 5) return;
 
+  const startTime = performance.now();
+
+  function step(currentTime: number) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / durationMs, 1);
+    // Ease-out cubic: rapidly accelerates and smoothly lands
+    const ease = 1 - Math.pow(1 - progress, 3);
+    window.scrollTo(0, startY + diff * ease);
+
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    }
+  }
+
+  requestAnimationFrame(step);
+}
 
 export default function ProductDetailClient({ initialProduct }: { initialProduct: Product }) {
   const searchParams = useSearchParams();
@@ -54,6 +75,7 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
   const { trackEvent } = useAnalytics();
   const { showToast } = useToast();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const productTopRef = useRef<HTMLDivElement>(null);
 
   // The server resolved this product (and 404'd if it did not exist), so it is
   // always the FULL document — description, features, reviews. Context copies
@@ -100,9 +122,18 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
     return product.colors;
   }, [product?.colors, product?.variations]);
 
-  const imagesList = product?.images && product.images.length > 0
-    ? product.images
-    : ['https://images.unsplash.com/photo-1583391733956-6c78276477e2?auto=format&fit=crop&w=800&q=80'];
+  const imagesList = useMemo(() => {
+    const list = product?.images && product.images.length > 0
+      ? [...product.images]
+      : ['https://images.unsplash.com/photo-1583391733956-6c78276477e2?auto=format&fit=crop&w=800&q=80'];
+
+    product?.variations?.forEach((v) => {
+      if (v.imageUrl && !list.includes(v.imageUrl)) {
+        list.push(v.imageUrl);
+      }
+    });
+    return list;
+  }, [product?.images, product?.variations]);
 
   const [selectedColor, setSelectedColor] = useState(() => {
     if (colorQueryParam && colorsList) {
@@ -153,6 +184,17 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
 
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
+
+  // Preload all gallery and variation images in background for instant 0ms switching
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    imagesList.forEach((url) => {
+      if (url && typeof url === 'string') {
+        const img = new Image();
+        img.src = url;
+      }
+    });
+  }, [imagesList]);
 
 
   // Mouse Hover Image Zoom Lens State
@@ -276,6 +318,71 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
       url.searchParams.set('color', selectedColor);
       url.searchParams.set('size', sz);
       window.history.replaceState({}, '', url.toString());
+    }
+  };
+
+  // 1b. When user selects an option from Available Options grid -> select color, size, image and scroll up
+  const handleSelectVariation = (item: VariationDisplayItem) => {
+    // A. Select color
+    setSelectedColor(item.colorName);
+
+    // B. Select size
+    let nextSize = item.size || selectedSize;
+    if (item.size) {
+      setSelectedSize(item.size);
+    } else {
+      const newColorSizes = product?.variations && product.variations.length > 0
+        ? Array.from(new Set(product.variations.filter((v) => !v.isHidden && v.colorName.toLowerCase() === item.colorName.toLowerCase()).map((v) => v.size).filter(Boolean)))
+        : (product?.sizes && product.sizes.length > 0 ? product.sizes : ['Free Size']);
+      if (newColorSizes.length > 0 && !newColorSizes.includes(selectedSize)) {
+        nextSize = newColorSizes[0];
+        setSelectedSize(nextSize);
+      }
+    }
+
+    // C. Select matching product image
+    let matchedImgIdx = -1;
+    if (item.imageUrl) {
+      matchedImgIdx = imagesList.findIndex((img) => img === item.imageUrl);
+    }
+
+    if (matchedImgIdx === -1) {
+      const colorObj = colorsList.find((c) => c.name.toLowerCase() === item.colorName.toLowerCase());
+      if (colorObj) {
+        if (typeof colorObj.imageIndex === 'number' && imagesList[colorObj.imageIndex]) {
+          matchedImgIdx = colorObj.imageIndex;
+        } else if ((colorObj as { images?: string[] }).images && ((colorObj as { images?: string[] }).images?.length ?? 0) > 0) {
+          const firstColorImg = (colorObj as { images?: string[] }).images?.[0];
+          matchedImgIdx = imagesList.findIndex((img) => img === firstColorImg);
+        }
+      }
+    }
+
+    if (matchedImgIdx === -1) {
+      const colorIdx = colorsList.findIndex((c) => c.name.toLowerCase() === item.colorName.toLowerCase());
+      if (colorIdx !== -1 && imagesList[colorIdx]) {
+        matchedImgIdx = colorIdx;
+      }
+    }
+
+    if (matchedImgIdx !== -1) {
+      setSelectedImageIndex(matchedImgIdx);
+    }
+
+    // D. Update URL search params dynamically
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('color', item.colorName);
+      if (nextSize) url.searchParams.set('size', nextSize);
+      window.history.replaceState({}, '', url.toString());
+    }
+
+    // E. Fast snappy scroll up to top section
+    if (typeof window !== 'undefined') {
+      const targetY = productTopRef.current
+        ? Math.max(0, productTopRef.current.getBoundingClientRect().top + window.pageYOffset - 80)
+        : 0;
+      fastScrollTo(targetY, 260);
     }
   };
 
@@ -521,7 +628,7 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }} />
 
       {/* Breadcrumbs */}
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-[11px] sm:text-xs text-stone-500">
+      <nav ref={productTopRef} aria-label="Breadcrumb" className="scroll-mt-24 flex items-center gap-1 text-[11px] sm:text-xs text-stone-500">
         <Link href="/" className="hover:text-[#A80C14] transition-colors shrink-0">Home</Link>
         <ChevronRight className="w-3 h-3 shrink-0" />
         <Link href="/shop" className="hover:text-[#A80C14] transition-colors shrink-0">Shop</Link>
@@ -777,7 +884,12 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
 
 
       {/* Product Variations Options Grid */}
-      <ProductVariationsGrid product={product} />
+      <ProductVariationsGrid
+        product={product}
+        selectedColor={selectedColor}
+        selectedSize={selectedSize}
+        onSelectVariation={handleSelectVariation}
+      />
 
       {/* Specification & Review Tabs */}
       <div ref={tabsRef} className="pt-6 sm:pt-8 border-t border-[#F8D2D5] space-y-5 sm:space-y-6 scroll-mt-20">

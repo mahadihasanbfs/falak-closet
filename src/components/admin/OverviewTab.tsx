@@ -21,7 +21,7 @@ import { OrderRecord } from '@/context/CartContext';
 import { Product } from '@/data/products';
 import { formatCurrency } from '@/lib/utils';
 
-import { ORDER_STATUSES } from '@/lib/orders';
+import { ORDER_STATUSES } from '@/lib/orderStatuses';
 
 interface OverviewTabProps {
   orders: OrderRecord[];

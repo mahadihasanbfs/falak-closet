@@ -4,7 +4,7 @@ import { buildOrderData, serializeOrder, OrderValidationError, adjustStockForOrd
 import { evaluatePromotion } from '@/lib/promotions';
 import { getPathaoDeliveryFee, calculateOrderWeight } from '@/lib/shipping/pathao';
 import { getStoreSettingsSafe } from '@/lib/siteSettings';
-import { checkIsFreeDelivery } from '@/lib/shipping/locationBilingual';
+import { checkIsFreeDelivery, calculateShippingFee } from '@/lib/shipping/locationBilingual';
 import { broadcastSocketEventServer } from '@/lib/socketServerBroadcast';
 
 function errorMessage(err: unknown) {
@@ -169,7 +169,31 @@ export async function POST(req: Request) {
 
     const subtotal = data.subtotal;
 
-    // Server-side Pathao delivery fee & free-shipping validation
+    const storeSettings = await getStoreSettingsSafe();
+    const isFreeShipping = checkIsFreeDelivery(
+      data.items as any,
+      subtotal,
+      storeSettings.freeShippingThreshold
+    );
+
+    // Calculate customer delivery fee based on standard store rates:
+    // Inside Dhaka: 80, Sub-area Dhaka: 100, Outside Dhaka: 150 (or 0 if free delivery)
+    const shippingCalc = calculateShippingFee({
+      district: body.shippingAddress?.district,
+      city: body.shippingAddress?.city,
+      address: body.shippingAddress?.fullAddress || body.shippingAddress?.street,
+      zoneName: body.shippingAddress?.pathaoZoneName || body.deliveryZone,
+      areaName: body.shippingAddress?.pathaoAreaName || body.deliverySubArea,
+      subtotal,
+      freeShippingThreshold: storeSettings.freeShippingThreshold,
+      isFreeDelivery: isFreeShipping,
+      items: data.items as any,
+    });
+
+    data.shippingFee = isFreeShipping ? 0 : shippingCalc.fee;
+
+    // Server-side Pathao delivery fee quote for internal merchant logistics only
+    // (Does not overwrite the standard customer shipping fee)
     const pathaoCityId = body.shippingAddress?.pathaoCityId;
     const pathaoZoneId = body.shippingAddress?.pathaoZoneId;
 
@@ -182,17 +206,9 @@ export async function POST(req: Request) {
           weight,
         });
 
-        const storeSettings = await getStoreSettingsSafe();
-        const isFreeShipping = checkIsFreeDelivery(
-          data.items as any,
-          subtotal,
-          storeSettings.freeShippingThreshold
-        );
-
         data.courierDeliveryFee = quote.final_price;
-        data.shippingFee = isFreeShipping ? 0 : quote.final_price;
       } catch (pathaoErr) {
-        console.error('[POST /api/orders] Pathao price calculation failed, preserving provided fee:', pathaoErr);
+        console.error('[POST /api/orders] Pathao price calculation failed:', pathaoErr);
       }
     }
 
@@ -222,7 +238,7 @@ export async function POST(req: Request) {
         }
       }
     } else {
-      data.discount = 0;
+      data.discount = typeof body.discount === 'number' ? body.discount : 0;
       data.promoCode = null;
       data.total = Math.max(0, subtotal - (data.discount || 0) + shippingFee);
     }

@@ -12,13 +12,21 @@ import { ProductZoomModal } from '@/components/product/ProductZoomModal';
 
 interface ProductVariationsGridProps {
   product: Product;
+  selectedColor?: string;
+  selectedSize?: string;
+  onSelectVariation?: (item: VariationDisplayItem) => void;
 }
 
 import { VariationCard, VariationDisplayItem } from '@/components/product/VariationCard';
 
 export type { VariationDisplayItem };
 
-export function ProductVariationsGrid({ product }: ProductVariationsGridProps) {
+export function ProductVariationsGrid({
+  product,
+  selectedColor,
+  selectedSize,
+  onSelectVariation,
+}: ProductVariationsGridProps) {
   const router = useRouter();
   const { addToCart } = useCart();
   const { showToast } = useToast();
@@ -256,16 +264,25 @@ export function ProductVariationsGrid({ product }: ProductVariationsGridProps) {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4 md:gap-5">
-          {filteredVariations.map((item) => (
-            <VariationCard
-              key={item.id}
-              item={item}
-              product={product}
-              onAddToCart={handleAddToCart}
-              onBuyNow={handleBuyNow}
-              onOpenZoom={handleOpenZoom}
-            />
-          ))}
+          {filteredVariations.map((item) => {
+            const isSelected =
+              Boolean(selectedColor) &&
+              item.colorName.trim().toLowerCase() === (selectedColor || '').trim().toLowerCase() &&
+              (!item.size || item.size === 'Free Size' || !selectedSize || selectedSize === 'Free Size' || item.size.trim().toLowerCase() === (selectedSize || '').trim().toLowerCase());
+
+            return (
+              <VariationCard
+                key={item.id}
+                item={item}
+                product={product}
+                isSelected={isSelected}
+                onSelect={onSelectVariation}
+                onAddToCart={handleAddToCart}
+                onBuyNow={handleBuyNow}
+                onOpenZoom={handleOpenZoom}
+              />
+            );
+          })}
         </div>
       )}
 

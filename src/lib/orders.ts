@@ -14,29 +14,8 @@
 
 import type { Order as OrderRow, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-
-/** Statuses the admin UI can set. Stored as a plain String — see the schema comment. */
-export const ORDER_STATUSES = [
-  'Pending',
-  'Confirmed',
-  'Processing',
-  'Packed',
-  'Ready for Shipment',
-  'Shipped',
-  'Out for Delivery',
-  'Delivered',
-  'Completed',
-  'Payment Pending',
-  'Payment Failed',
-  'Cancelled',
-  'Return Requested',
-  'Returned',
-  'Refund Processing',
-  'Refunded',
-  'Failed Delivery',
-] as const;
-
-export type OrderStatusValue = (typeof ORDER_STATUSES)[number];
+import { ORDER_STATUSES, type OrderStatusValue } from './orderStatuses';
+export { ORDER_STATUSES, type OrderStatusValue };
 
 function opt<T>(value: T | null): T | undefined {
   return value === null ? undefined : value;

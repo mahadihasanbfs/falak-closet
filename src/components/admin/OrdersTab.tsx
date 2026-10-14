@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { OrderRecord } from '@/context/CartContext';
 import { formatCurrency } from '@/lib/utils';
-import { ORDER_STATUSES } from '@/lib/orders';
+import { ORDER_STATUSES } from '@/lib/orderStatuses';
 import { OrderDetailsModal } from '@/components/admin/OrderDetailsModal';
 
 interface OrdersTabProps {

@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { OrderRecord } from '@/context/CartContext';
 import { formatCurrency, getProductVariationPrice } from '@/lib/utils';
-import { ORDER_STATUSES } from '@/lib/orders';
+import { ORDER_STATUSES } from '@/lib/orderStatuses';
 import { getSearchableTerms, calculateShippingFee } from '@/lib/shipping/locationBilingual';
 import { useToast } from '@/components/ui/Toast';
 

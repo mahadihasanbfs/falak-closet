@@ -496,16 +496,18 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           fullName: cleanName,
           phone: digitsOnly,
           fullAddress: cleanAddress,
-          district: parsedAddress.districtNameEn || (activeTier === 'dhaka_core' ? 'Dhaka City' : activeTier === 'dhaka_subarea' ? 'Dhaka Sub-area' : 'Outside Dhaka'),
+          district: parsedAddress.districtNameEn || (activeTier === 'dhaka_core' ? 'Dhaka' : 'Outside Dhaka'),
+          division: parsedAddress.divisionNameEn || (activeTier === 'dhaka_core' ? 'Dhaka' : 'Outside Dhaka'),
           city: parsedAddress.districtNameEn || (activeTier === 'dhaka_core' ? 'Dhaka' : 'Outside Dhaka'),
         },
         deliveryMethod: activeTier === 'dhaka_core'
           ? 'Inside Dhaka (৳80)'
           : activeTier === 'dhaka_subarea'
           ? 'Sub-area Dhaka (৳100)'
-          : 'Outside Dhaka (৳150)',
+          : `Outside Dhaka (৳150)${parsedAddress.districtNameEn ? ` - ${parsedAddress.districtNameEn}` : ''}`,
         paymentMethod: 'Cash on Delivery',
-        deliveryZone: activeTier,
+        deliveryZone: parsedAddress.divisionNameEn || activeTier,
+        deliverySubArea: parsedAddress.thanaNameEn || parsedAddress.districtNameEn || undefined,
         paymentStatus: 'Pending',
         userEmail: effectiveEmail,
         userId: activeUser?.id,

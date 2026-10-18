@@ -17,7 +17,7 @@ import { createPortal } from 'react-dom';
 import { Printer, X, Info, ExternalLink, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { OrderRecord } from '@/context/CartContext';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, getProductVariationColorHex } from '@/lib/utils';
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -310,9 +310,24 @@ export function ReceiptModal({ order, onClose }: ReceiptModalProps) {
                         <td className="py-2.5 pl-3 pr-2">
                           <p className="font-bold text-[#0D153A] leading-snug">{itemName}</p>
                           {(item.selectedColor || item.selectedSize) && (
-                            <p className="text-[9px] text-stone-400 mt-0.5">
-                              {[item.selectedColor, item.selectedSize].filter(Boolean).join(' · ')}
-                            </p>
+                            <div className="flex items-center gap-1.5 text-[9px] text-stone-500 mt-0.5">
+                              {item.selectedColor && (
+                                <span className="inline-flex items-center gap-1">
+                                  {(() => {
+                                    const hex = getProductVariationColorHex(item.product, item.selectedColor);
+                                    return hex ? (
+                                      <span
+                                        className="w-2 h-2 rounded-full border border-black/20 shrink-0"
+                                        style={{ backgroundColor: hex }}
+                                      />
+                                    ) : null;
+                                  })()}
+                                  <span>{item.selectedColor}</span>
+                                </span>
+                              )}
+                              {item.selectedColor && item.selectedSize && <span>·</span>}
+                              {item.selectedSize && <span>{item.selectedSize}</span>}
+                            </div>
                           )}
                         </td>
                         <td className="text-center py-2.5 px-2 font-mono">{item.quantity}</td>

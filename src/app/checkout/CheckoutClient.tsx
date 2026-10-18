@@ -42,7 +42,7 @@ import {
   getDistrictsByDivision,
   findDistrict,
 } from '@/lib/shipping/bangladeshLocations';
-import { getProductVariationImage, getProductVariationPrice } from '@/lib/utils';
+import { getProductVariationImage, getProductVariationPrice, getProductVariationColorHex } from '@/lib/utils';
 
 /** Shared 44px-touch-target text field. */
 function Field({
@@ -826,13 +826,13 @@ export default function CheckoutClient() {
         total: totalAmount,
         shippingAddress: updatedShippingAddress,
         deliveryMethod: districtName
-          ? `Standard Delivery (${districtName}${divisionName ? `, ${divisionName}` : ''})`
+          ? `Standard Delivery (${parsed.thanaNameEn ? `${parsed.thanaNameEn}, ` : ''}${districtName}${divisionName ? `, ${divisionName}` : ''})`
           : selectedZoneName + (selectedSubAreaName ? ` - ${selectedSubAreaName}` : ''),
         paymentMethod,
         userEmail,
         userIp,
         deliveryZone: divisionName || selectedZoneObj?.zone_name || selectedZoneName,
-        deliverySubArea: districtName || selectedAreaObj?.area_name || selectedSubAreaName || undefined,
+        deliverySubArea: parsed.thanaNameEn || districtName || selectedAreaObj?.area_name || selectedSubAreaName || undefined,
         promoCode: appliedCoupon?.code || undefined,
       };
 
@@ -1075,9 +1075,28 @@ export default function CheckoutClient() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="font-bold text-stone-900 line-clamp-1 text-xs">{item.product?.name}</p>
-                          <p className="text-[10px] text-stone-500 truncate mt-0.5 font-medium">
-                            {item.selectedColor} • {item.selectedSize}
-                          </p>
+                          <div className="flex items-center gap-1.5 text-[10px] text-stone-500 truncate mt-0.5 font-medium">
+                            {item.selectedColor && (
+                              <span className="inline-flex items-center gap-1">
+                                {(() => {
+                                  const hex = getProductVariationColorHex(item.product, item.selectedColor);
+                                  return hex ? (
+                                    <span
+                                      className="w-2 h-2 rounded-full border border-black/15 shrink-0 shadow-2xs"
+                                      style={{ backgroundColor: hex }}
+                                    />
+                                  ) : null;
+                                })()}
+                                <span>{item.selectedColor}</span>
+                              </span>
+                            )}
+                            {item.selectedSize && (
+                              <>
+                                <span className="text-stone-300">•</span>
+                                <span>{item.selectedSize}</span>
+                              </>
+                            )}
+                          </div>
                           <p className="text-[11px] font-mono font-semibold text-[#A80C14] mt-0.5">
                             ৳ {itemPrice}
                           </p>

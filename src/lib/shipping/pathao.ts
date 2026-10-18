@@ -125,12 +125,13 @@ export function calculateOrderWeight(items: Array<{ product?: any; quantity: num
 }
 
 function getPathaoConfig() {
-  const baseUrl = process.env.PATHAO_BASE_URL || 'https://api-hermes.pathao.com';
-  const clientId = process.env.PATHAO_CLIENT_ID || '';
-  const clientSecret = process.env.PATHAO_CLIENT_SECRET || '';
-  const username = process.env.PATHAO_USERNAME || '';
-  const password = process.env.PATHAO_PASSWORD || '';
-  const storeId = process.env.PATHAO_STORE_ID || ''; // Optional per Pathao API docs
+  const rawBaseUrl = process.env.PATHAO_BASE_URL || 'https://api-hermes.pathao.com';
+  const baseUrl = rawBaseUrl.trim().replace(/\/+$/, '');
+  const clientId = (process.env.PATHAO_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.PATHAO_CLIENT_SECRET || '').trim();
+  const username = (process.env.PATHAO_USERNAME || '').trim();
+  const password = (process.env.PATHAO_PASSWORD || '').trim();
+  const storeId = (process.env.PATHAO_STORE_ID || '').trim();
 
   return { baseUrl, clientId, clientSecret, username, password, storeId };
 }

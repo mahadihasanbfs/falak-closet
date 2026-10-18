@@ -26,7 +26,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useCart, OrderRecord } from '@/context/CartContext';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, getProductVariationImage, getProductVariationColorHex } from '@/lib/utils';
 import { ReceiptModal } from '@/components/receipt/ReceiptModal';
 
 // Safe Image Component for products in order preview
@@ -595,7 +595,7 @@ function TrackContent() {
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="relative w-12 h-14 rounded-xl overflow-hidden bg-stone-50 shrink-0 border border-stone-200/60">
                       <SafeImage
-                        src={item.product?.images?.[0] || ''}
+                        src={getProductVariationImage(item.product, item.selectedColor)}
                         alt={item.product?.name || 'Product'}
                         className="object-cover"
                       />
@@ -607,7 +607,16 @@ function TrackContent() {
 
                       <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-stone-400">
                         {item.selectedColor && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-stone-50 border border-stone-200/60 rounded font-medium">
+                          <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 bg-stone-50 border border-stone-200/60 rounded font-medium">
+                            {(() => {
+                              const hex = getProductVariationColorHex(item.product, item.selectedColor);
+                              return hex ? (
+                                <span
+                                  className="w-2 h-2 rounded-full border border-black/15 shrink-0 shadow-2xs"
+                                  style={{ backgroundColor: hex }}
+                                />
+                              ) : null;
+                            })()}
                             Color: <strong className="text-[#0D153A]">{item.selectedColor}</strong>
                           </span>
                         )}

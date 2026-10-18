@@ -32,7 +32,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { OrderRecord } from '@/context/CartContext';
-import { formatCurrency, getProductVariationPrice } from '@/lib/utils';
+import { formatCurrency, getProductVariationPrice, getProductVariationImage, getProductVariationColorHex } from '@/lib/utils';
 import { ORDER_STATUSES } from '@/lib/orderStatuses';
 import { getSearchableTerms, calculateShippingFee } from '@/lib/shipping/locationBilingual';
 import { useToast } from '@/components/ui/Toast';
@@ -953,25 +953,47 @@ export function OrderDetailsModal({
                 const name = prod.name || 'Product';
                 const price = getProductVariationPrice(prod, item.selectedColor, item.selectedSize);
                 const lineTotal = price * (item.quantity || 1);
+                const itemImg = getProductVariationImage(prod, item.selectedColor);
+                const colorHex = getProductVariationColorHex(prod, item.selectedColor);
+
                 return (
-                  <div key={idx} className="p-4 flex items-center justify-between gap-4 text-xs">
-                    <div className="flex items-center gap-3">
-                      {prod.images?.[0] && (
+                  <div key={idx} className="p-4 flex items-center justify-between gap-4 text-xs hover:bg-stone-50/50 transition-colors">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      {itemImg && (
                         // eslint-disable-next-javascript-element-type/no-img-element
                         <img
-                          src={prod.images[0]}
+                          src={itemImg}
                           alt={name}
-                          className="w-10 h-12 object-cover rounded-lg border border-stone-200"
+                          className="w-11 h-13 object-cover rounded-lg border border-stone-200 shrink-0 shadow-2xs"
                         />
                       )}
-                      <div>
-                        <p className="font-bold text-stone-900">{name}</p>
-                        <p className="text-[10px] text-stone-500 font-mono mt-0.5">
-                          {item.selectedColor || 'N/A'} • {item.selectedSize || 'N/A'}
-                        </p>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-stone-900 leading-snug">{name}</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] font-mono text-stone-600">
+                          {item.selectedColor ? (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-stone-100 border border-stone-200/90 text-stone-800 font-sans font-medium">
+                              {colorHex && (
+                                <span
+                                  className="w-2.5 h-2.5 rounded-full border border-black/15 shrink-0 shadow-2xs"
+                                  style={{ backgroundColor: colorHex }}
+                                  title={`${item.selectedColor} (${colorHex})`}
+                                />
+                              )}
+                              <span>{item.selectedColor}</span>
+                            </span>
+                          ) : (
+                            <span className="text-stone-400">N/A</span>
+                          )}
+                          {item.selectedSize && (
+                            <>
+                              <span className="text-stone-300">•</span>
+                              <span className="text-stone-500">{item.selectedSize}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right font-mono">
+                    <div className="text-right font-mono shrink-0">
                       <p className="font-bold text-stone-900">{formatCurrency(lineTotal)}</p>
                       <p className="text-[10px] text-stone-500">
                         {formatCurrency(price)} × {item.quantity || 1}

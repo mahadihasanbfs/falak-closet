@@ -18,10 +18,14 @@ import {
   BangladeshDistrict,
   BangladeshDivision,
 } from './bangladeshLocations';
+import { BANGLADESH_UPAZILAS, BangladeshUpazila } from './bangladeshUpazilas';
 
 export interface ParsedLocation {
   district: BangladeshDistrict | null;
   division: BangladeshDivision | null;
+  thana: BangladeshUpazila | null;
+  thanaNameEn: string;
+  thanaNameBn: string;
   districtNameEn: string;
   districtNameBn: string;
   divisionNameEn: string;
@@ -352,11 +356,12 @@ function isFuzzyMatch(token: string, candidate: string): boolean {
     return true;
   }
 
-  // 3. English Levenshtein distance (only compare single words of similar length)
+  // 3. English Levenshtein distance (only compare single words of similar length with matching first character)
   if (
     cleanTok &&
     cleanCand &&
     !cleanCand.includes(' ') &&
+    cleanTok[0] === cleanCand[0] &&
     Math.abs(cleanTok.length - cleanCand.length) <= 1
   ) {
     if (cleanCand.length >= 4 && cleanCand.length <= 5) {
@@ -366,12 +371,13 @@ function isFuzzyMatch(token: string, candidate: string): boolean {
     }
   }
 
-  // 4. Bengali Levenshtein distance (only compare single words of similar length)
+  // 4. Bengali Levenshtein distance (only compare single words of similar length with matching first character)
   if (
     bnTok &&
     bnCand &&
     !bnCand.includes(' ') &&
     bnCand.length >= 3 &&
+    bnTok[0] === bnCand[0] &&
     Math.abs(bnTok.length - bnCand.length) <= 1
   ) {
     if (levenshteinDistance(bnTok, bnCand) <= 1) return true;
@@ -391,6 +397,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
   const defaultResult: ParsedLocation = {
     district: null,
     division: null,
+    thana: null,
+    thanaNameEn: '',
+    thanaNameBn: '',
     districtNameEn: '',
     districtNameBn: '',
     divisionNameEn: '',
@@ -441,6 +450,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
       return {
         district: matchedDist || null,
         division: matchedDiv || null,
+        thana: null,
+        thanaNameEn: '',
+        thanaNameBn: '',
         districtNameEn: matchedDist?.nameEn || 'Dhaka',
         districtNameBn: matchedDist?.nameBn || 'ঢাকা',
         divisionNameEn: 'Dhaka',
@@ -464,6 +476,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
         return {
           district: matchedDist || null,
           division: matchedDiv || null,
+          thana: null,
+          thanaNameEn: '',
+          thanaNameBn: '',
           districtNameEn: matchedDist?.nameEn || 'Dhaka',
           districtNameBn: matchedDist?.nameBn || 'ঢাকা',
           divisionNameEn: 'Dhaka',
@@ -479,7 +494,72 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
     }
   }
 
-  // ─── STEP 2: CHECK ALL 64 BANGLADESH DISTRICTS ───────────────────────────
+  // ─── STEP 2A: CHECK ALL BANGLADESH UPAZILAS / THANAS (উপজেলা / থানা) ──────
+  for (const upz of BANGLADESH_UPAZILAS) {
+    const aliases = upz.aliases || [upz.nameEn.toLowerCase(), upz.nameBn];
+
+    const matchedAlias = aliases.find((alias) => {
+      const aliasClean = alias.toLowerCase();
+      if (lowerRaw.includes(aliasClean)) return true;
+      const aliasBnNorm = normalizeBengali(alias);
+      if (aliasBnNorm && normBnRaw.includes(aliasBnNorm)) return true;
+      return false;
+    });
+
+    const isMatch =
+      Boolean(matchedAlias) ||
+      shingles.some((tok) => aliases.some((a) => isFuzzyMatch(tok, a)));
+
+    if (isMatch) {
+      const parentDist = BANGLADESH_DISTRICTS.find((d) => d.id === upz.districtId);
+      const parentDiv = parentDist
+        ? BANGLADESH_DIVISIONS.find((d) => d.id === parentDist.divisionId)
+        : null;
+
+      const isSubArea = parentDist?.isDhakaSubArea || false;
+      const isDhakaDist = parentDist?.id === 'dhaka';
+
+      const tier = isSubArea
+        ? 'dhaka_subarea'
+        : isDhakaDist
+        ? 'dhaka_core'
+        : 'outside_dhaka';
+
+      const rate = tier === 'dhaka_core' ? 80 : tier === 'dhaka_subarea' ? 100 : 150;
+
+      const badgeLabelBn = isDhakaDist
+        ? `থানা: ${upz.nameBn} | জেলা: ঢাকা • ডেলিভারি চার্জ: ৳৮০ (ঢাকার ভিতরে)`
+        : isSubArea
+        ? `থানা: ${upz.nameBn} | জেলা: ${parentDist?.nameBn} • ডেলিভারি চার্জ: ৳১০০ (সাব-এরিয়া)`
+        : `থানা: ${upz.nameBn} | জেলা: ${parentDist?.nameBn} | বিভাগ: ${parentDiv?.nameBn} • ডেলিভারি চার্জ: ৳১৫০ (ঢাকার বাইরে)`;
+
+      const badgeLabelEn = isDhakaDist
+        ? `Thana: ${upz.nameEn} | District: Dhaka • Delivery: ৳80 (Inside Dhaka)`
+        : isSubArea
+        ? `Thana: ${upz.nameEn} | District: ${parentDist?.nameEn} • Delivery: ৳100 (Sub-area)`
+        : `Thana: ${upz.nameEn} | District: ${parentDist?.nameEn} | Division: ${parentDiv?.nameEn} • Delivery: ৳150 (Outside Dhaka)`;
+
+      return {
+        district: parentDist || null,
+        division: parentDiv || null,
+        thana: upz,
+        thanaNameEn: upz.nameEn,
+        thanaNameBn: upz.nameBn,
+        districtNameEn: parentDist?.nameEn || '',
+        districtNameBn: parentDist?.nameBn || '',
+        divisionNameEn: parentDiv?.nameEn || '',
+        divisionNameBn: parentDiv?.nameBn || '',
+        tier,
+        rate,
+        matchedName: upz.nameBn,
+        badgeLabelBn,
+        badgeLabelEn,
+        isRecognized: true,
+      };
+    }
+  }
+
+  // ─── STEP 2B: CHECK ALL 64 BANGLADESH DISTRICTS ───────────────────────────
   // Prioritize specific districts (e.g. Pabna, Bogura, Cumilla) over division-capital districts (e.g. Rajshahi, Chattogram)
   // so that "Pabna, Rajshahi" correctly resolves District: Pabna and Division: Rajshahi.
   const prioritizedDistricts = [
@@ -527,6 +607,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
       return {
         district: dist,
         division: parentDiv || null,
+        thana: null,
+        thanaNameEn: '',
+        thanaNameBn: '',
         districtNameEn: dist.nameEn,
         districtNameBn: dist.nameBn,
         divisionNameEn: dist.divisionNameEn,
@@ -571,6 +654,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
         return {
           district: dist,
           division: parentDiv || null,
+          thana: null,
+          thanaNameEn: '',
+          thanaNameBn: '',
           districtNameEn: dist.nameEn,
           districtNameBn: dist.nameBn,
           divisionNameEn: dist.divisionNameEn,
@@ -600,6 +686,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
       return {
         district: dhakaDist,
         division: dhakaDiv,
+        thana: null,
+        thanaNameEn: '',
+        thanaNameBn: '',
         districtNameEn: 'Dhaka',
         districtNameBn: 'ঢাকা',
         divisionNameEn: 'Dhaka',
@@ -622,6 +711,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
         return {
           district: dhakaDist,
           division: dhakaDiv,
+          thana: null,
+          thanaNameEn: '',
+          thanaNameBn: '',
           districtNameEn: 'Dhaka',
           districtNameBn: 'ঢাকা',
           divisionNameEn: 'Dhaka',
@@ -656,6 +748,9 @@ export function parseAddressLocation(rawAddress: string | null | undefined): Par
       return {
         district: correspondingDist || null,
         division: div,
+        thana: null,
+        thanaNameEn: '',
+        thanaNameBn: '',
         districtNameEn: correspondingDist?.nameEn || div.nameEn,
         districtNameBn: correspondingDist?.nameBn || div.nameBn,
         divisionNameEn: div.nameEn,

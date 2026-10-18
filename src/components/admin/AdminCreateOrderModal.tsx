@@ -24,7 +24,7 @@ import {
 import Image from 'next/image';
 import { Product } from '@/data/products';
 import { CartItem, OrderRecord } from '@/context/CartContext';
-import { formatCurrency, getProductVariationPrice } from '@/lib/utils';
+import { formatCurrency, getProductVariationPrice, getProductVariationImage, getProductVariationColorHex } from '@/lib/utils';
 import { useToast } from '@/components/ui/Toast';
 
 interface AdminCreateOrderModalProps {
@@ -427,7 +427,7 @@ export function AdminCreateOrderModal({
                     >
                       <div className="relative w-12 h-14 rounded-lg overflow-hidden bg-stone-800 flex-shrink-0">
                         <Image
-                          src={item.product?.images[0]}
+                          src={getProductVariationImage(item.product, item.selectedColor)}
                           alt={item.product?.name}
                           fill
                           sizes="48px"
@@ -437,10 +437,28 @@ export function AdminCreateOrderModal({
 
                       <div className="flex-1 min-w-0">
                         <p className="font-bold text-stone-100 text-xs line-clamp-1">{item.product?.name}</p>
-                        <p className="text-[10px] text-stone-400 mt-0.5 font-mono">
-                          {item.selectedColor} | {item.selectedSize}
-                        </p>
-                        <span className="text-xs font-bold text-amber-400 font-mono block mt-0.5">
+                        <div className="flex items-center gap-2 mt-1">
+                          {item.selectedColor && (
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-stone-800 border border-stone-750 text-[10px] text-stone-200">
+                              {(() => {
+                                const hex = getProductVariationColorHex(item.product, item.selectedColor);
+                                return hex ? (
+                                  <span
+                                    className="w-2.5 h-2.5 rounded-full border border-white/20 shrink-0"
+                                    style={{ backgroundColor: hex }}
+                                  />
+                                ) : null;
+                              })()}
+                              <span>{item.selectedColor}</span>
+                            </span>
+                          )}
+                          {item.selectedSize && (
+                            <span className="text-[10px] text-stone-400 font-mono">
+                              | {item.selectedSize}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-bold text-amber-400 font-mono block mt-1">
                           {formatCurrency(getProductVariationPrice(item.product, item.selectedColor, item.selectedSize) * item.quantity)}
                         </span>
                       </div>

@@ -18,7 +18,7 @@ import {
   MapPin
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
-import { formatCurrency, getProductVariationImage, getProductVariationPrice } from '@/lib/utils';
+import { formatCurrency, getProductVariationImage, getProductVariationPrice, getProductVariationColorHex } from '@/lib/utils';
 
 export default function CartClient() {
   const {
@@ -283,8 +283,17 @@ export default function CartClient() {
                         <p className="text-xs text-stone-400 font-mono">Code: {item.product?.code || 'FLK'}</p>
                         <div className="flex flex-wrap items-center gap-2 pt-0.5 text-xs">
                           {item.selectedColor && (
-                            <span className="px-2.5 py-0.5 bg-[#FDF2F3] text-[#A80C14] border border-[#F8D2D5] font-semibold rounded-full">
-                              Color: <span className="font-bold">{item.selectedColor}</span>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#FDF2F3] text-[#A80C14] border border-[#F8D2D5] font-semibold rounded-full">
+                              {(() => {
+                                const hex = getProductVariationColorHex(item.product, item.selectedColor);
+                                return hex ? (
+                                  <span
+                                    className="w-2.5 h-2.5 rounded-full border border-black/15 shrink-0 shadow-2xs"
+                                    style={{ backgroundColor: hex }}
+                                  />
+                                ) : null;
+                              })()}
+                              <span>Color: <span className="font-bold">{item.selectedColor}</span></span>
                             </span>
                           )}
                           {item.selectedSize && (
@@ -361,8 +370,17 @@ export default function CartClient() {
                         <p className="text-[11px] text-stone-400 font-mono">Code: {item.product?.code || 'FLK'}</p>
                         <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
                           {item.selectedColor && (
-                            <span className="px-2 py-0.5 bg-[#FDF2F3] text-[#A80C14] border border-[#F8D2D5] font-semibold rounded-full">
-                              {item.selectedColor}
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FDF2F3] text-[#A80C14] border border-[#F8D2D5] font-semibold rounded-full">
+                              {(() => {
+                                const hex = getProductVariationColorHex(item.product, item.selectedColor);
+                                return hex ? (
+                                  <span
+                                    className="w-2 h-2 rounded-full border border-black/15 shrink-0 shadow-2xs"
+                                    style={{ backgroundColor: hex }}
+                                  />
+                                ) : null;
+                              })()}
+                              <span>{item.selectedColor}</span>
                             </span>
                           )}
                           {item.selectedSize && (

@@ -45,7 +45,6 @@ import {
   X,
   KeyRound,
   Mail,
-  Sparkles,
   Info,
   FileText,
   Palette,
@@ -172,25 +171,61 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
   );
 
   const colorsList = useMemo(() => {
-    if (Array.isArray(product.colors) && product.colors.length >= 4) {
+    if (Array.isArray(product.colors) && product.colors.length > 0) {
       return product.colors.map((c, i) => ({
         name: c.name,
-        hex: c.hex || presetColors[i % presetColors.length].hex,
+        hex: c.hex || presetColors[i % presetColors.length]?.hex || '#1E1E22',
         image:
           c.images?.[0] ||
           product.images?.[i] ||
-          presetColors[i % presetColors.length].image,
+          product.images?.[0] ||
+          presetColors[i % presetColors.length]?.image ||
+          '',
+      }));
+    }
+    if (Array.isArray(product.variations) && product.variations.length > 0) {
+      const seen = new Set<string>();
+      const fromVars: { name: string; hex: string; image: string }[] = [];
+      product.variations.forEach((v, idx) => {
+        if (v.colorName && !seen.has(v.colorName.toLowerCase())) {
+          seen.add(v.colorName.toLowerCase());
+          fromVars.push({
+            name: v.colorName,
+            hex: v.colorHex || presetColors[idx % presetColors.length]?.hex || '#1E1E22',
+            image: v.imageUrl || product.images?.[idx] || product.images?.[0] || '',
+          });
+        }
+      });
+      if (fromVars.length > 0) return fromVars;
+    }
+    if (Array.isArray(product.images) && product.images.length > 0) {
+      return product.images.map((img, i) => ({
+        name: `Color ${i + 1}`,
+        hex: presetColors[i % presetColors.length]?.hex || '#1E1E22',
+        image: img,
       }));
     }
     return presetColors;
-  }, [product.colors, product.images, presetColors]);
+  }, [product.colors, product.variations, product.images, presetColors]);
 
-  const [selectedColor, setSelectedColor] = useState<string>(colorsList[0]?.name || 'Olive / Mint Green');
+  const [selectedColor, setSelectedColor] = useState<string>(colorsList[0]?.name || 'Standard');
   const [activeImage, setActiveImage] = useState<string>(
     colorsList[0]?.image ||
     product.images?.[0] ||
-    'https://res.cloudinary.com/t9sxkcr3/image/upload/v1791361471/falak-closet/products/zyxn5eamdeq6przkkivo.png'
+    presetColors[0]?.image ||
+    ''
   );
+
+  useEffect(() => {
+    if (colorsList.length > 0) {
+      setSelectedColor(colorsList[0].name);
+      if (colorsList[0].image) {
+        setActiveImage(colorsList[0].image);
+      }
+    } else if (product.images?.[0]) {
+      setActiveImage(product.images[0]);
+    }
+  }, [product.id, colorsList]);
 
   // 6 colors per slide page
   const [colorPage, setColorPage] = useState<number>(0);
@@ -249,30 +284,61 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
     }
   };
 
-  // ─── Dynamic Pricing Calculation ───────────────────────────────────────────
-  const regularPrice = useMemo(() => {
-    return (product.originalPrice && product.originalPrice > 0)
-      ? product.originalPrice
-      : (product.price && product.price > 0 ? product.price : 850);
-  }, [product.originalPrice, product.price]);
+  const currentColorIndex = useMemo(() => {
+    const idx = colorsList.findIndex(
+      (c) => c.name.toLowerCase() === selectedColor.toLowerCase()
+    );
+    return idx >= 0 ? idx : 0;
+  }, [colorsList, selectedColor]);
 
-  const discountPercent = useMemo(() => {
-    if (typeof product.landingDiscountPercentage === 'number') {
-      return Math.max(0, Math.round(product.landingDiscountPercentage));
-    }
-    if (typeof product.discountPercentage === 'number' && product.discountPercentage > 0) {
-      return Math.round(product.discountPercentage);
-    }
-    if (regularPrice > product.price && product.price > 0) {
-      return Math.round(((regularPrice - product.price) / regularPrice) * 100);
-    }
-    return 0; // Default fallback discount: 0%
-  }, [product.landingDiscountPercentage, product.discountPercentage, product.price, regularPrice]);
+  const handlePrevVariant = () => {
+    if (colorsList.length <= 1) return;
+    const prevIndex = (currentColorIndex - 1 + colorsList.length) % colorsList.length;
+    handleColorSelect(colorsList[prevIndex].name, prevIndex);
+  };
+
+  const handleNextVariant = () => {
+    if (colorsList.length <= 1) return;
+    const nextIndex = (currentColorIndex + 1) % colorsList.length;
+    handleColorSelect(colorsList[nextIndex].name, nextIndex);
+  };
+
+  // ─── Active Variation Match (For dynamic pricing per variant) ───────────────
+  const activeVariation = useMemo(() => {
+    if (!product.variations || product.variations.length === 0) return null;
+    return (
+      product.variations.find(
+        (v) => v.colorName && v.colorName.toLowerCase() === selectedColor.toLowerCase()
+      ) || null
+    );
+  }, [product.variations, selectedColor]);
+
+  // ─── Dynamic Pricing Calculation (Directly from Product Catalog) ───────────
+  const basePrice = product.price || 0;
+  const baseOriginalPrice = product.originalPrice || 0;
 
   const offerPrice = useMemo(() => {
-    if (discountPercent <= 0) return product.price || regularPrice;
-    return Math.max(1, Math.round(regularPrice * (1 - discountPercent / 100)));
-  }, [regularPrice, discountPercent, product.price]);
+    if (activeVariation) {
+      const vPrice = activeVariation.price ?? activeVariation.priceOverride;
+      if (typeof vPrice === 'number' && vPrice > 0) return vPrice;
+    }
+    return basePrice > 0 ? basePrice : (baseOriginalPrice > 0 ? baseOriginalPrice : 0);
+  }, [activeVariation, basePrice, baseOriginalPrice]);
+
+  const regularPrice = useMemo(() => {
+    if (activeVariation) {
+      const vOrig = activeVariation.originalPrice;
+      if (typeof vOrig === 'number' && vOrig > 0) return vOrig;
+    }
+    return baseOriginalPrice > 0 ? baseOriginalPrice : offerPrice;
+  }, [activeVariation, baseOriginalPrice, offerPrice]);
+
+  const discountPercent = useMemo(() => {
+    if (regularPrice > offerPrice && offerPrice > 0) {
+      return Math.round(((regularPrice - offerPrice) / regularPrice) * 100);
+    }
+    return 0;
+  }, [regularPrice, offerPrice]);
 
   const discountBadge = `${discountPercent}% OFF`;
 
@@ -734,7 +800,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               Thank You, {fullName}! 🎉
             </h1>
             <p className="text-stone-600 text-xs sm:text-sm max-w-md mx-auto leading-relaxed">
-              Your Cash on Delivery order for <strong>Premium Shiny Shade Jersey Branded Stone Hijab</strong> has been successfully placed. Our team will call you shortly to confirm shipment.
+              Your Cash on Delivery order for <strong>{product.name}</strong> has been successfully placed. Our team will call you shortly to confirm shipment.
             </p>
           </div>
 
@@ -776,7 +842,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             </Link>
             <a
               href={`https://wa.me/8801799775487?text=${encodeURIComponent(
-                `Hello, I have placed an order. Order ID: ${orderSuccess.id} (Premium Shiny Shade Jersey Branded Stone Hijab)`
+                `Hello, I have placed an order. Order ID: ${orderSuccess.id} (${product.name})`
               )}`}
               target="_blank"
               rel="noopener noreferrer"
@@ -827,7 +893,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             <ShieldCheck className="w-3.5 h-3.5 text-[#800020]" /> Cash On Delivery
           </span>
           <span className="flex items-center gap-1.5 hidden sm:flex">
-            <RotateCcw className="w-3.5 h-3.5 text-[#800020]" /> 7-Day Easy Exchange
+            <RotateCcw className="w-3.5 h-3.5 text-[#800020]" /> Doorstep Inspection Policy
           </span>
         </div>
       </div>
@@ -838,26 +904,27 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           {/* Category Tag */}
           <div className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#800020] font-extrabold text-[11px] uppercase tracking-wider mb-3">
             <Crown className="w-3.5 h-3.5 text-[#800020]" />
-            <span>PREMIUM MODEST COLLECTION</span>
+            <span>{product.category ? `${product.category} COLLECTION` : 'PREMIUM MODEST COLLECTION'}</span>
           </div>
 
           {/* H1 Headline */}
           <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl font-extrabold text-[#7A0C14] leading-tight tracking-tight max-w-4xl mx-auto uppercase">
-            PREMIUM SHINY SHADE JERSEY BRANDED STONE HIJAB
+            {product.name}
           </h1>
 
           {/* Sub-headline */}
           <p className="text-stone-600 text-xs sm:text-sm max-w-2xl mx-auto mt-3 leading-relaxed">
-            Experience sheer elegance with soft, breathable jersey fabric and exquisite branded stone work — perfect for every modest occasion.
+            {product.description ||
+              `Experience sheer elegance with soft, breathable ${product.material ? `${product.material.toLowerCase()} fabric` : 'fabric'}${product.workType ? ` and exquisite ${product.workType.toLowerCase()}` : ''} — perfect for every modest occasion.`}
           </p>
 
           {/* Feature Highlights (3 items with icons) */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6 mt-4 text-xs font-semibold text-stone-700">
             <span className="flex items-center gap-1.5 text-[#800020]">
-              <Feather className="w-3.5 h-3.5 text-[#800020]" /> Premium Shiny Jersey Fabric
+              <Feather className="w-3.5 h-3.5 text-[#800020]" /> {product.material ? `Premium ${product.material} Fabric` : 'Premium Quality Fabric'}
             </span>
             <span className="flex items-center gap-1.5 text-[#800020]">
-              <Award className="w-3.5 h-3.5 text-[#800020]" /> Durable, High-Quality Branded Stone Work
+              <Award className="w-3.5 h-3.5 text-[#800020]" /> {product.workType ? `Durable, High-Quality ${product.workType}` : 'Durable, High-Quality Craftsmanship'}
             </span>
             <span className="flex items-center gap-1.5 text-[#800020]">
               <CheckCircle className="w-3.5 h-3.5 text-[#800020]" /> Comfortable, Non-Slip, & Easy to Style
@@ -913,15 +980,10 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
                       <span>PRODUCT PREVIEW VIDEO</span>
                     </div>
-                    {totalReviewsCount > 0 ? (
+                    {totalReviewsCount > 0 && (
                       <div className="bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-amber-300 text-[11px] font-bold flex items-center gap-1 border border-white/20">
                         <Star className="w-3.5 h-3.5 fill-amber-300" />
                         <span>{avgRating} / 5.0</span>
-                      </div>
-                    ) : (
-                      <div className="bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-amber-200 text-[11px] font-bold flex items-center gap-1 border border-white/20">
-                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                        <span>Featured</span>
                       </div>
                     )}
                   </div>
@@ -984,15 +1046,10 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                     <span>FEATURED PRODUCT SHOWCASE</span>
                   </div>
-                  {totalReviewsCount > 0 ? (
+                  {totalReviewsCount > 0 && (
                     <div className="bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-amber-300 text-[11px] font-bold flex items-center gap-1 border border-white/20">
                       <Star className="w-3.5 h-3.5 fill-amber-300" />
                       <span>{avgRating} / 5.0</span>
-                    </div>
-                  ) : (
-                    <div className="bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-amber-200 text-[11px] font-bold flex items-center gap-1 border border-white/20">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                      <span>Featured</span>
                     </div>
                   )}
                 </div>
@@ -1040,7 +1097,9 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               UNIQUE SELLING POINTS
             </p>
             <h2 className="font-serif text-2xl sm:text-3xl font-extrabold text-[#7A0C14] uppercase">
-              WHY THIS HIJAB IS PERFECT FOR YOU?
+              {product.category && !product.category.toLowerCase().includes('hijab')
+                ? `WHY THIS ${product.category.toUpperCase()} IS PERFECT FOR YOU?`
+                : 'WHY THIS HIJAB IS PERFECT FOR YOU?'}
             </h2>
             <p className="text-xs sm:text-sm text-stone-500 max-w-md mx-auto">
               Premium craft, imported fabric, and attention to every modest detail.
@@ -1050,20 +1109,20 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           {/* 6-Card Responsive Grid */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {/* 1 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-[#F8D2D5] transition-all">
+            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
               <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center border border-amber-200 mb-3 shadow-xs">
                 <Feather className="w-6 h-6" />
               </div>
               <div>
                 <h3 className="font-bold text-sm text-stone-900">Premium Quality Fabric</h3>
                 <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  Soft, breathable jersey fabric for all-day wear without feeling heavy.
+                  Soft, breathable {product.material ? `${product.material.toLowerCase()} fabric` : 'fabric'} for all-day wear without feeling heavy.
                 </p>
               </div>
             </div>
 
             {/* 2 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-[#F8D2D5] transition-all">
+            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
               <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-200 mb-3 shadow-xs">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
@@ -1076,20 +1135,22 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             </div>
 
             {/* 3 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-[#F8D2D5] transition-all">
+            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
               <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center border border-rose-200 mb-3 shadow-xs">
                 <Award className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-stone-900">No Stone Shedding</h3>
+                <h3 className="font-bold text-sm text-stone-900">
+                  {product.workType ? `${product.workType} Detail` : 'Exquisite Detailing'}
+                </h3>
                 <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  High-grade branded stone setting that won't fall off during wash or wear.
+                  High-grade {product.workType ? `${product.workType.toLowerCase()} craftsmanship` : 'craftsmanship'} that won't easily wear off.
                 </p>
               </div>
             </div>
 
             {/* 4 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-[#F8D2D5] transition-all">
+            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
               <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center border border-purple-200 mb-3 shadow-xs">
                 <Layers className="w-6 h-6" />
               </div>
@@ -1102,7 +1163,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             </div>
 
             {/* 5 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-[#F8D2D5] transition-all">
+            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
               <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200 mb-3 shadow-xs">
                 <Truck className="w-6 h-6" />
               </div>
@@ -1114,16 +1175,49 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               </div>
             </div>
 
-            {/* 6 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-between hover:border-[#F8D2D5] transition-all">
-              <div className="w-12 h-12 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200 mb-3 shadow-xs">
-                <RotateCcw className="w-6 h-6" />
+            {/* 6: Doorstep Inspection & Parcel Return Rules */}
+            <div className="bg-[#FAF6F4] rounded-2xl p-4 sm:p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all col-span-2 md:col-span-1">
+              <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200 mb-3 shadow-xs shrink-0">
+                <RotateCcw className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-sm text-stone-900">Hassle-Free Return</h3>
-                <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  7-day easy return and replacement support if any issue arises.
-                </p>
+                <h3 className="font-bold text-sm text-stone-900 leading-snug">
+                  Doorstep Inspection &amp; Parcel Return Rules
+                </h3>
+                <ul className="mt-3 space-y-2 text-[11px] leading-relaxed text-stone-600">
+                  <li className="space-y-0.5">
+                    <strong className="text-stone-900 font-bold block">
+                      Inspect in Front of Delivery Rider:
+                    </strong>
+                    <span>
+                      Customers are required to check the contents of their parcel in front of the courier delivery rider at the time of delivery.
+                    </span>
+                  </li>
+                  <li className="space-y-0.5">
+                    <strong className="text-stone-900 font-bold block">
+                      Full Parcel Return:
+                    </strong>
+                    <span>
+                      If you choose to return the parcel upon inspection, the entire parcel must be handed back to the rider along with payment for the delivery fee.
+                    </span>
+                  </li>
+                  <li className="space-y-0.5">
+                    <strong className="text-stone-900 font-bold block">
+                      No Partial Deliveries:
+                    </strong>
+                    <span>
+                      We do not offer partial delivery (e.g. keeping only 1 item and returning the remainder from a multi-item package).
+                    </span>
+                  </li>
+                  <li className="space-y-0.5">
+                    <strong className="text-stone-900 font-bold block">
+                      Post-Acceptance Policy:
+                    </strong>
+                    <span>
+                      Once the parcel has been accepted and received from the delivery rider, returns are no longer accepted from our page.
+                    </span>
+                  </li>
+                </ul>
               </div>
             </div>
           </div>
@@ -1147,8 +1241,8 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
 
           {/* 2-Column Responsive Container */}
           <div className="bg-white rounded-3xl border border-stone-200 p-5 sm:p-8 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 items-center">
-            {/* Left: Dynamic Main Image Preview */}
-            <div className="aspect-[4/5] relative rounded-2xl overflow-hidden bg-stone-100 border border-stone-200/80 shrink-0 shadow-inner">
+            {/* Left: Dynamic Main Image Preview with Carousel Controls */}
+            <div className="aspect-[4/5] relative rounded-2xl overflow-hidden bg-stone-100 border border-stone-200/80 shrink-0 shadow-inner group">
               <Image
                 src={activeImage}
                 alt={`Selected Color: ${selectedColor}`}
@@ -1157,9 +1251,49 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 className="object-cover object-top transition-all duration-300"
                 priority
               />
-              <span className="absolute top-3 left-3 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-3 py-1 rounded-full border border-white/20">
+
+              {/* Active Color Badge */}
+              <span className="absolute top-3 left-3 bg-black/70 backdrop-blur-md text-white text-[11px] font-bold px-3 py-1 rounded-full border border-white/20 z-10 shadow-xs">
                 Active: {selectedColor}
               </span>
+
+              {/* Variant Index Counter */}
+              {colorsList.length > 1 && (
+                <span className="absolute top-3 right-3 bg-black/70 backdrop-blur-md text-amber-200 text-[11px] font-mono font-bold px-2.5 py-1 rounded-full border border-white/20 z-10 shadow-xs">
+                  {currentColorIndex + 1} / {colorsList.length}
+                </span>
+              )}
+
+              {/* Carousel Navigation Buttons on Left & Right */}
+              {colorsList.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePrevVariant();
+                    }}
+                    className="absolute left-2.5 sm:left-3.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/60 hover:bg-[#800020] text-white flex items-center justify-center backdrop-blur-md border border-white/30 shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer group/btn"
+                    aria-label="Previous variant"
+                    title="Previous variant"
+                  >
+                    <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6 group-hover/btn:-translate-x-0.5 transition-transform stroke-[2.5]" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleNextVariant();
+                    }}
+                    className="absolute right-2.5 sm:right-3.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/60 hover:bg-[#800020] text-white flex items-center justify-center backdrop-blur-md border border-white/30 shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer group/btn"
+                    aria-label="Next variant"
+                    title="Next variant"
+                  >
+                    <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6 group-hover/btn:translate-x-0.5 transition-transform stroke-[2.5]" />
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Right: Interactive Swatch Chips & Thumbnails */}
@@ -1171,7 +1305,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     COLOR SELECTION
                   </span>
                   <h3 className="font-serif text-lg sm:text-xl font-bold text-stone-900 mt-0.5">
-                    Premium Shiny Shade Jersey
+                    {product.name}
                   </h3>
                   <p className="text-xs text-stone-500 mt-1">
                     Selected Shade: <strong className="text-[#800020]">{selectedColor}</strong>
@@ -1567,7 +1701,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 </div>
                 <div className="flex items-center gap-2">
                   <RotateCcw className="w-4 h-4 text-[#800020] shrink-0" />
-                  <span>7-Day easy return & replacement support</span>
+                  <span>Doorstep parcel inspection before acceptance</span>
                 </div>
               </div>
             </div>
@@ -1788,7 +1922,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           </div>
           <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex items-center justify-center gap-3">
             <RotateCcw className="w-5 h-5 text-[#800020]" />
-            <span className="text-xs font-bold text-stone-800">7-Day Return Policy</span>
+            <span className="text-xs font-bold text-stone-800">Doorstep Inspection Policy</span>
           </div>
         </div>
       </section>
@@ -1827,7 +1961,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 <span>All Active</span>
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] font-bold shadow-xs">
-                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <Crown className="w-3.5 h-3.5 shrink-0" />
                 <span>Modest style</span>
               </span>
             </div>

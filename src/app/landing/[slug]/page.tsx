@@ -35,19 +35,35 @@ export async function generateMetadata({
     product.images?.[0] ||
     'https://images.unsplash.com/photo-1583391733956-6c78276477e2?auto=format&fit=crop&w=1200&q=80';
 
-  const title = `Limited Time Offer: ${product.name} | Falak Closet`;
-  const description = `Special promotional offer on ${product.name}! Original price: ${formatCurrency(product.originalPrice || product.price)}. Order now at a special discounted price of ${formatCurrency(product.price)} with Cash on Delivery nationwide.`;
+  const sellingPrice = product.price || 0;
+  const regularPrice =
+    product.originalPrice && product.originalPrice > 0
+      ? product.originalPrice
+      : sellingPrice;
+  const discountPercent =
+    regularPrice > sellingPrice && sellingPrice > 0
+      ? Math.round(((regularPrice - sellingPrice) / regularPrice) * 100)
+      : 0;
+  const effectivePrice = sellingPrice > 0 ? sellingPrice : regularPrice;
+
+  const pageTitle = `${product.name} | Special Offer | Falak Closet`;
+  const description =
+    discountPercent > 0
+      ? `Special promotional offer on ${product.name}! Regular price: ${formatCurrency(regularPrice)}. Special offer price: ${formatCurrency(effectivePrice)} (${discountPercent}% OFF) with Cash on Delivery nationwide.`
+      : `Special promotional offer on ${product.name}! Order now at ${formatCurrency(effectivePrice)} with Cash on Delivery nationwide.`;
 
   const canonicalUrl = `https://falakcloset.com/landing/${product.slug}`;
 
   return {
-    title,
+    title: {
+      absolute: pageTitle,
+    },
     description,
     alternates: {
       canonical: canonicalUrl,
     },
     openGraph: {
-      title,
+      title: pageTitle,
       description,
       url: canonicalUrl,
       siteName: 'Falak Closet Modest Fashion',
@@ -64,12 +80,12 @@ export async function generateMetadata({
     },
     twitter: {
       card: 'summary_large_image',
-      title,
+      title: pageTitle,
       description,
       images: [previewImage],
     },
     other: {
-      'product:price:amount': String(product.price),
+      'product:price:amount': String(effectivePrice),
       'product:price:currency': 'BDT',
       'product:availability': product.stock > 0 ? 'in stock' : 'out of stock',
       'product:condition': 'new',

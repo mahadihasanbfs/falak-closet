@@ -6,7 +6,6 @@ import Link from 'next/link';
 import {
   Video,
   Upload,
-  Percent,
   CheckCircle2,
   ExternalLink,
   Trash2,
@@ -18,7 +17,8 @@ import {
   Search,
   Check,
   AlertCircle,
-  Eye
+  Eye,
+  X
 } from 'lucide-react';
 import { Product } from '@/data/products';
 import { useAdminDashboard } from '@/components/admin/AdminDashboardContext';
@@ -34,7 +34,6 @@ export function LandingPagesTab() {
 
   // Form fields
   const [videoUrl, setVideoUrl] = useState<string>('');
-  const [discountPercent, setDiscountPercent] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -44,15 +43,17 @@ export function LandingPagesTab() {
   useEffect(() => {
     if (admin.productsList && admin.productsList.length > 0) {
       setProducts(admin.productsList);
-      // Default to the hijab landing product if present
-      const hijab = admin.productsList.find(
-        (p) => p.slug === 'premium-shiny-shade-jersey-branded-stone-hijab'
-      );
-      if (hijab) {
-        setSelectedProductId(hijab.id);
-      } else {
-        setSelectedProductId(admin.productsList[0].id);
-      }
+      setSelectedProductId((currentId) => {
+        // If an existing selection is already valid, preserve it
+        if (currentId && admin.productsList.some((p) => p.id === currentId)) {
+          return currentId;
+        }
+        // Default to the hijab landing product if present
+        const hijab = admin.productsList.find(
+          (p) => p.slug === 'premium-shiny-shade-jersey-branded-stone-hijab'
+        );
+        return hijab ? hijab.id : admin.productsList[0].id;
+      });
     }
   }, [admin.productsList]);
 
@@ -65,41 +66,33 @@ export function LandingPagesTab() {
   useEffect(() => {
     if (selectedProduct) {
       setVideoUrl(selectedProduct.videoUrl || '');
-      setDiscountPercent(
-        typeof selectedProduct.landingDiscountPercentage === 'number' &&
-        selectedProduct.landingDiscountPercentage > 0
-          ? String(selectedProduct.landingDiscountPercentage)
-          : selectedProduct.discountPercentage && selectedProduct.discountPercentage > 0
-          ? String(selectedProduct.discountPercentage)
-          : ''
-      );
       setSaveSuccess(false);
       setUploadError(null);
     }
   }, [selectedProduct]);
 
-  // Price calculations
+  // Price calculations directly from selected product catalog data
   const regularPrice = useMemo(() => {
-    if (!selectedProduct) return 850;
-    return (selectedProduct.originalPrice && selectedProduct.originalPrice > 0)
+    if (!selectedProduct) return 0;
+    return selectedProduct.originalPrice && selectedProduct.originalPrice > 0
       ? selectedProduct.originalPrice
-      : (selectedProduct.price || 850);
+      : (selectedProduct.price || 0);
   }, [selectedProduct]);
 
-  const parsedDiscount = useMemo(() => {
-    const val = parseFloat(discountPercent);
-    if (isNaN(val) || val < 0) return 0;
-    return Math.min(100, val);
-  }, [discountPercent]);
+  const sellingPrice = useMemo(() => {
+    return selectedProduct?.price || 0;
+  }, [selectedProduct]);
 
-  const calculatedOfferPrice = useMemo(() => {
-    if (parsedDiscount <= 0) return selectedProduct?.price || regularPrice;
-    return Math.max(1, Math.round(regularPrice * (1 - parsedDiscount / 100)));
-  }, [regularPrice, parsedDiscount, selectedProduct]);
+  const calculatedDiscount = useMemo(() => {
+    if (regularPrice > sellingPrice && sellingPrice > 0) {
+      return Math.round(((regularPrice - sellingPrice) / regularPrice) * 100);
+    }
+    return 0;
+  }, [regularPrice, sellingPrice]);
 
   const savingsAmount = useMemo(() => {
-    return Math.max(0, regularPrice - calculatedOfferPrice);
-  }, [regularPrice, calculatedOfferPrice]);
+    return Math.max(0, regularPrice - sellingPrice);
+  }, [regularPrice, sellingPrice]);
 
   const isYouTube = useMemo(() => isYouTubeUrl(videoUrl), [videoUrl]);
   const youTubeEmbedUrl = useMemo(() => {
@@ -165,7 +158,7 @@ export function LandingPagesTab() {
     try {
       const payload: Record<string, any> = {
         videoUrl: videoUrl.trim() || null,
-        landingDiscountPercentage: discountPercent.trim() ? parseFloat(discountPercent) : null,
+        landingDiscountPercentage: null,
       };
 
       const res = await fetch(`/api/products/${selectedProduct.id}`, {
@@ -183,7 +176,7 @@ export function LandingPagesTab() {
       setProducts((prev) =>
         prev.map((p) =>
           p.id === selectedProduct.id
-            ? { ...p, videoUrl: payload.videoUrl, landingDiscountPercentage: payload.landingDiscountPercentage }
+            ? { ...p, videoUrl: payload.videoUrl, landingDiscountPercentage: undefined }
             : p
         )
       );
@@ -207,14 +200,25 @@ export function LandingPagesTab() {
   // Filtered products list for selector
   const filteredProducts = useMemo(() => {
     if (!searchFilter.trim()) return products;
-    const q = searchFilter.toLowerCase();
+    const q = searchFilter.toLowerCase().trim();
     return products.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.category?.toLowerCase().includes(q) ||
-        p.slug.toLowerCase().includes(q)
+        p.slug.toLowerCase().includes(q) ||
+        (p.code && p.code.toLowerCase().includes(q))
     );
   }, [products, searchFilter]);
+
+  // Keep selectedProductId in sync when filtering so preview immediately reflects the matched/selected product
+  useEffect(() => {
+    if (filteredProducts.length > 0) {
+      const exists = filteredProducts.some((p) => p.id === selectedProductId);
+      if (!exists) {
+        setSelectedProductId(filteredProducts[0].id);
+      }
+    }
+  }, [filteredProducts, selectedProductId]);
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
@@ -263,32 +267,70 @@ export function LandingPagesTab() {
             </div>
 
             {/* Search filter for products */}
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-3 text-stone-400" />
-              <input
-                type="text"
-                value={searchFilter}
-                onChange={(e) => setSearchFilter(e.target.value)}
-                placeholder="Filter by product name..."
-                className="w-full text-xs pl-9 pr-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
-              />
+            <div className="space-y-1.5">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-3 text-stone-400" />
+                <input
+                  type="text"
+                  value={searchFilter}
+                  onChange={(e) => setSearchFilter(e.target.value)}
+                  placeholder="Filter by product name, code or category..."
+                  className="w-full text-xs pl-9 pr-9 py-2.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
+                />
+                {searchFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchFilter('')}
+                    className="absolute right-2.5 top-2.5 p-1 text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-200/60 transition-colors cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {searchFilter.trim() && (
+                <div className="flex items-center justify-between text-[11px] px-1 text-stone-500">
+                  <span>
+                    Matches: <strong className="text-[#800020]">{filteredProducts.length}</strong> product{filteredProducts.length !== 1 ? 's' : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSearchFilter('')}
+                    className="text-[#800020] hover:underline font-semibold cursor-pointer"
+                  >
+                    Show all products
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Product selection dropdown */}
             <select
               value={selectedProductId}
-              onChange={(e) => setSelectedProductId(e.target.value)}
+              onChange={(e) => {
+                const newId = e.target.value;
+                if (newId) {
+                  setSelectedProductId(newId);
+                }
+              }}
               className="w-full text-xs font-semibold p-3 bg-[#FAF6F4] border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020] cursor-pointer"
             >
-              {filteredProducts.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({formatCurrency(p.price)})
+              {filteredProducts.length === 0 ? (
+                <option value="" disabled>
+                  No products matching &quot;{searchFilter}&quot;
                 </option>
-              ))}
+              ) : (
+                filteredProducts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({formatCurrency(p.price)})
+                  </option>
+                ))
+              )}
             </select>
 
             {/* Selected Product Card Summary */}
-            {selectedProduct && (
+            {selectedProduct ? (
               <div className="pt-3 border-t border-stone-100 flex gap-4 items-center bg-[#FCFAF8] p-3.5 rounded-2xl border border-stone-200/60">
                 <div className="w-16 h-20 rounded-xl overflow-hidden relative shrink-0 border border-stone-200 bg-white shadow-xs">
                   <Image
@@ -306,9 +348,11 @@ export function LandingPagesTab() {
                     {selectedProduct.name}
                   </h4>
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="text-stone-400 line-through font-mono text-[11px]">
-                      ৳{regularPrice}
-                    </span>
+                    {regularPrice > selectedProduct.price && (
+                      <span className="text-stone-400 line-through font-mono text-[11px]">
+                        ৳{regularPrice}
+                      </span>
+                    )}
                     <span className="font-mono font-bold text-[#800020]">
                       ৳{selectedProduct.price}
                     </span>
@@ -318,6 +362,10 @@ export function LandingPagesTab() {
                   </p>
                 </div>
               </div>
+            ) : (
+              <div className="pt-3 border-t border-stone-100 p-4 rounded-2xl bg-stone-50 border border-dashed border-stone-200 text-center text-xs text-stone-400">
+                No product selected
+              </div>
             )}
           </div>
 
@@ -326,22 +374,22 @@ export function LandingPagesTab() {
             <div className="flex items-center justify-between pb-2 border-b border-stone-100">
               <span className="text-xs font-extrabold uppercase tracking-wider text-stone-700 flex items-center gap-1.5">
                 <Tag className="w-4 h-4 text-[#800020]" />
-                <span>Live Offer Price Calculation</span>
+                <span>Product Pricing &amp; Discount</span>
               </span>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Auto-calculated
+                From Catalog
               </span>
             </div>
 
             <div className="bg-[#FAF6F4] rounded-2xl p-4 border border-stone-200 space-y-2 text-xs">
               <div className="flex justify-between items-center text-stone-600">
-                <span>Base Regular Price:</span>
+                <span>Regular Price (Original):</span>
                 <span className="font-mono font-bold text-stone-900">৳{regularPrice}</span>
               </div>
               <div className="flex justify-between items-center text-stone-600">
-                <span>Discount Rate:</span>
+                <span>Calculated Discount:</span>
                 <span className="font-mono font-bold text-[#800020]">
-                  {parsedDiscount > 0 ? `${parsedDiscount}%` : '0% (Standard Price)'}
+                  {calculatedDiscount > 0 ? `${calculatedDiscount}% OFF` : '0% (Standard Price)'}
                 </span>
               </div>
               <div className="flex justify-between items-center text-stone-600">
@@ -349,9 +397,9 @@ export function LandingPagesTab() {
                 <span className="font-mono font-bold text-emerald-700">৳{savingsAmount}</span>
               </div>
               <div className="flex justify-between items-center pt-2.5 border-t border-stone-200 text-sm font-extrabold">
-                <span className="text-stone-900">Calculated Offer Price:</span>
+                <span className="text-stone-900">Live Offer Price:</span>
                 <span className="font-mono text-xl text-[#800020] font-black">
-                  ৳{calculatedOfferPrice}
+                  ৳{sellingPrice}
                 </span>
               </div>
             </div>
@@ -359,7 +407,7 @@ export function LandingPagesTab() {
             <p className="text-[11px] text-stone-500 leading-relaxed flex items-start gap-1.5">
               <Info className="w-4 h-4 text-[#800020] shrink-0 mt-0.5" />
               <span>
-                This <strong>Offer Price (৳{calculatedOfferPrice})</strong> will automatically update the landing page hero banner, discount badge ({parsedDiscount}% OFF), mobile buy bar, and checkout order total.
+                The landing page automatically uses this <strong>Offer Price (৳{sellingPrice})</strong> and calculated discount ({calculatedDiscount > 0 ? `${calculatedDiscount}% OFF` : 'regular price'}) directly from the product catalog.
               </span>
             </p>
           </div>
@@ -506,47 +554,7 @@ export function LandingPagesTab() {
             </div>
           </div>
 
-          {/* Discount Percentage Card */}
-          <div className="bg-white rounded-3xl border border-stone-200/80 p-6 sm:p-8 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-stone-100">
-              <div>
-                <h3 className="font-serif font-bold text-base text-stone-900 flex items-center gap-2">
-                  <Percent className="w-4 h-4 text-[#800020]" />
-                  <span>Landing Page Discount Percentage</span>
-                </h3>
-                <p className="text-xs text-stone-500 mt-0.5">
-                  Enter custom discount percentage for this landing funnel. Optional.
-                </p>
-              </div>
-              <span className="px-2.5 py-0.5 bg-stone-100 text-stone-600 text-[10px] font-bold rounded-full">
-                Optional
-              </span>
-            </div>
 
-            <div className="space-y-2">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-700">
-                Discount Rate (%)
-              </label>
-              <div className="relative max-w-xs">
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="1"
-                  value={discountPercent}
-                  onChange={(e) => setDiscountPercent(e.target.value)}
-                  placeholder="e.g. 18"
-                  className="w-full text-base font-mono font-bold px-4 py-3 bg-[#FAF6F4] border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020] pr-10"
-                />
-                <span className="absolute right-4 top-3.5 text-stone-400 font-mono font-bold text-sm">
-                  %
-                </span>
-              </div>
-              <p className="text-[11px] text-stone-400">
-                Example: 18% discount on ৳{regularPrice} produces an offer price of ৳{calculatedOfferPrice}. Leave empty to use regular price.
-              </p>
-            </div>
-          </div>
 
           {/* Save Action Bar */}
           <div className="bg-white rounded-3xl border border-stone-200/80 p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">

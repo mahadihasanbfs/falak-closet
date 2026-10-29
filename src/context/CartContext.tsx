@@ -1,10 +1,10 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Product } from '@/data/products';
 import { AppliedCoupon } from '@/data/promotions';
 import { useWishlist } from '@/hooks/useWishlist';
-import { sendNewOrderNotification } from '@/lib/socketClient';
+import { sendNewOrderNotification, isSocketEnabled, getSocket } from '@/lib/socketClient';
 import { getProductVariationPrice } from '@/lib/utils';
 import { checkIsFreeDelivery } from '@/lib/shipping/locationBilingual';
 
@@ -115,6 +115,7 @@ interface CartContextType {
   removePromoCode: () => void;
   promoNotice: string | null;
   discountAmount: number;
+  comboDiscountAmount: number;
   shippingFee: number;
   totalAmount: number;
   freeShippingThreshold: number;
@@ -322,6 +323,37 @@ export function CartProvider({
       refreshProductsFromApi();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep products state synchronized if layout re-renders with fresh initialProducts
+  useEffect(() => {
+    if (initialProducts && initialProducts.length > 0) {
+      setProducts(initialProducts);
+    }
+  }, [initialProducts]);
+
+  // Real-time catalog sync via socket and local custom event
+  useEffect(() => {
+    const handleProductsChanged = () => {
+      refreshProductsFromApi();
+    };
+
+    window.addEventListener('falak:products-changed', handleProductsChanged);
+
+    let socket: any = null;
+    if (isSocketEnabled) {
+      try {
+        socket = getSocket();
+        socket.on('product_sync', handleProductsChanged);
+      } catch {}
+    }
+
+    return () => {
+      window.removeEventListener('falak:products-changed', handleProductsChanged);
+      if (socket) {
+        socket.off('product_sync', handleProductsChanged);
+      }
+    };
   }, []);
 
   // Once products are available, flush any pending server cart merge
@@ -600,7 +632,38 @@ export function CartProvider({
     setPromoNotice(null);
   };
 
-  const discountAmount = appliedCoupon ? Math.min(appliedCoupon.calculatedDiscount, subtotal) : 0;
+  // Calculate quantity-based tier combo discounts per product
+  const comboDiscountAmount = useMemo(() => {
+    let totalComboDiscount = 0;
+    const prodCounts: Record<string, { product: Product; qty: number }> = {};
+    cart.forEach((item) => {
+      const pid = item.product?.id;
+      if (pid && item.product) {
+        if (!prodCounts[pid]) {
+          prodCounts[pid] = { product: item.product, qty: 0 };
+        }
+        prodCounts[pid].qty += (item.quantity ?? 0);
+      }
+    });
+
+    Object.values(prodCounts).forEach(({ product, qty }) => {
+      const tiers = product.tierDiscounts;
+      if (Array.isArray(tiers) && tiers.length > 0) {
+        const sortedTiers = [...tiers]
+          .filter((t) => t.minQuantity > 0 && t.discountAmount > 0)
+          .sort((a, b) => b.minQuantity - a.minQuantity);
+        const matchedTier = sortedTiers.find((t) => qty >= t.minQuantity);
+        if (matchedTier) {
+          totalComboDiscount += matchedTier.discountAmount;
+        }
+      }
+    });
+
+    return totalComboDiscount;
+  }, [cart]);
+
+  const couponDiscount = appliedCoupon ? Math.min(appliedCoupon.calculatedDiscount, subtotal) : 0;
+  const discountAmount = Math.min(subtotal, couponDiscount + comboDiscountAmount);
 
   useEffect(() => {
     try {
@@ -811,6 +874,7 @@ export function CartProvider({
         removePromoCode,
         promoNotice,
         discountAmount,
+        comboDiscountAmount,
         shippingFee,
         totalAmount,
         freeShippingThreshold,

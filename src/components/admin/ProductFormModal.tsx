@@ -296,7 +296,8 @@ export function ProductFormModal({
     description: '',
     featuresText: '',
     careText: '',
-    freeDeliveryQuantity: 0
+    freeDeliveryQuantity: 0,
+    tierDiscounts: [] as { minQuantity: number; discountAmount: number }[]
   });
 
   // Save failure message, shown inline so it cannot be missed behind the overlay.
@@ -387,7 +388,13 @@ export function ProductFormModal({
         description: editingProduct.description || 'Luxury modest ensemble.',
         featuresText: (editingProduct.features || []).join('\n'),
         careText: (editingProduct.careInstructions || []).join('\n'),
-        freeDeliveryQuantity: editingProduct.freeDeliveryQuantity || 0
+        freeDeliveryQuantity: editingProduct.freeDeliveryQuantity || 0,
+        tierDiscounts: Array.isArray(editingProduct.tierDiscounts)
+          ? editingProduct.tierDiscounts.map((t) => ({
+              minQuantity: t.minQuantity,
+              discountAmount: t.discountAmount,
+            }))
+          : []
       });
 
 
@@ -473,7 +480,8 @@ export function ProductFormModal({
         description: '',
         featuresText: '',
         careText: '',
-        freeDeliveryQuantity: 0
+        freeDeliveryQuantity: 0,
+        tierDiscounts: []
       });
       setColorVariations([
         {
@@ -906,7 +914,8 @@ export function ProductFormModal({
         stock: totalStockFromMatrix > 0 ? totalStockFromMatrix : formData.stock,
         features,
         careInstructions,
-        freeDeliveryQuantity: formData.freeDeliveryQuantity || undefined
+        freeDeliveryQuantity: formData.freeDeliveryQuantity || undefined,
+        tierDiscounts: (formData.tierDiscounts || []).filter((t) => t.minQuantity > 0 && t.discountAmount > 0)
       });
 
       // Only close on a confirmed write — otherwise the admin loses the whole form.
@@ -1179,6 +1188,136 @@ export function ProductFormModal({
                       <p className="text-[10px] text-stone-500">
                         e.g. 3 = buying 3 or more pieces of this product makes delivery FREE. Leave empty or 0 to disable.
                       </p>
+                    </div>
+
+                    {/* Combo / Quantity Tier Discounts Section */}
+                    <div className="pt-4 border-t border-stone-200/80 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <label className="font-bold text-stone-800 text-sm flex items-center gap-2">
+                            <Tag className="w-4 h-4 text-[#A80C14]" />
+                            <span>Combo Pack / Quantity Tier Discounts (কম্বো অফার)</span>
+                          </label>
+                          <p className="text-xs text-stone-500 mt-0.5">
+                            একই প্রোডাক্ট একাধিক পিস কিনলে বিশেষ ছাড়ের অফার সেট করুন (যেমন: ৩ পিস কিনলে ৫০০৳ ছাড়, ৪ পিস কিনলে ৭০০৳ ছাড়)।
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData((prev) => {
+                              const existing = prev.tierDiscounts || [];
+                              const nextQty = existing.length > 0 ? Math.max(...existing.map((t) => t.minQuantity)) + 1 : 3;
+                              return {
+                                ...prev,
+                                tierDiscounts: [
+                                  ...existing,
+                                  { minQuantity: nextQty, discountAmount: 200 }
+                                ]
+                              };
+                            });
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#FDF2F3] text-[#A80C14] hover:bg-[#A80C14] hover:text-white border border-[#F8D2D5] text-xs font-bold transition-all cursor-pointer shadow-2xs shrink-0 self-start sm:self-auto"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ Add Combo Condition</span>
+                        </button>
+                      </div>
+
+                      {/* Tier conditions list */}
+                      {(!formData.tierDiscounts || formData.tierDiscounts.length === 0) ? (
+                        <div className="p-4 rounded-2xl bg-stone-50 border border-dashed border-stone-200 text-center space-y-1">
+                          <p className="text-xs font-semibold text-stone-600">No combo discount conditions configured.</p>
+                          <p className="text-[11px] text-stone-400">Click &quot;+ Add Combo Condition&quot; above to offer buy-more-save-more combo discounts.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {formData.tierDiscounts.map((tier, idx) => {
+                            const varPrices = variationsMatrix.map((v) => v.price).filter((p): p is number => typeof p === 'number' && p > 0);
+                            const unitPrice = varPrices.length > 0 ? Math.min(...varPrices) : (formData.price || 0);
+                            const normalTotal = unitPrice * (tier.minQuantity || 1);
+                            const discountedTotal = Math.max(0, normalTotal - (tier.discountAmount || 0));
+
+                            return (
+                              <div
+                                key={idx}
+                                className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 bg-stone-50/80 rounded-2xl border border-stone-200/90"
+                              >
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 flex-1">
+                                  <div>
+                                    <label className="text-[10px] font-bold text-stone-600 uppercase tracking-wider block mb-1">
+                                      Min Quantity (পিস সংখ্যা)
+                                    </label>
+                                    <div className="relative">
+                                      <input
+                                        type="number"
+                                        min={2}
+                                        value={tier.minQuantity || ''}
+                                        onChange={(e) => {
+                                          const val = e.target.value === '' ? 0 : Math.max(1, parseInt(e.target.value, 10));
+                                          const updated = [...(formData.tierDiscounts || [])];
+                                          updated[idx] = { ...updated[idx], minQuantity: val };
+                                          setFormData({ ...formData, tierDiscounts: updated });
+                                        }}
+                                        className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-[#A80C14]"
+                                        placeholder="e.g. 3"
+                                      />
+                                      <span className="absolute right-3 top-2 text-[11px] text-stone-400 font-bold">
+                                        pcs
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className="text-[10px] font-bold text-stone-600 uppercase tracking-wider block mb-1">
+                                      Discount Amount (ছাড়ের পরিমাণ ৳)
+                                    </label>
+                                    <div className="relative">
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        value={tier.discountAmount || ''}
+                                        onChange={(e) => {
+                                          const val = e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value));
+                                          const updated = [...(formData.tierDiscounts || [])];
+                                          updated[idx] = { ...updated[idx], discountAmount: val };
+                                          setFormData({ ...formData, tierDiscounts: updated });
+                                        }}
+                                        className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-[#A80C14]"
+                                        placeholder="e.g. 500"
+                                      />
+                                      <span className="absolute right-3 top-2 text-[11px] text-stone-400 font-bold">
+                                        ৳
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Calculation preview snippet */}
+                                {unitPrice > 0 && tier.minQuantity > 0 && tier.discountAmount > 0 && (
+                                  <div className="text-right text-[11px] text-stone-500 shrink-0 px-2 sm:border-l sm:border-stone-200">
+                                    <span className="line-through text-stone-400 font-mono">৳{normalTotal}</span>
+                                    <span className="font-extrabold text-[#A80C14] font-mono ml-1.5">৳{discountedTotal}</span>
+                                    <div className="text-[10px] text-emerald-700 font-bold">Save ৳{tier.discountAmount}</div>
+                                  </div>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = (formData.tierDiscounts || []).filter((_, i) => i !== idx);
+                                    setFormData({ ...formData, tierDiscounts: updated });
+                                  }}
+                                  className="p-2 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer self-end sm:self-center"
+                                  title="Remove Condition"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

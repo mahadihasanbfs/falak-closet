@@ -93,6 +93,10 @@ export function serializeProduct(row: ProductRow): Product {
       status: r.status === 'pending' ? 'pending' : r.status === 'approved' ? 'approved' : undefined,
     })),
     freeDeliveryQuantity: opt(row.freeDeliveryQuantity),
+    tierDiscounts: (row.tierDiscounts || []).map((t) => ({
+      minQuantity: t.minQuantity,
+      discountAmount: t.discountAmount,
+    })),
     videoUrl: opt(row.videoUrl),
     landingDiscountPercentage: opt(row.landingDiscountPercentage),
     createdAt: row.createdAt.toISOString(),
@@ -492,6 +496,20 @@ export function buildProductData(body: Raw, options: { partial?: boolean } = {})
         throw new ProductValidationError('Free delivery quantity must be a positive integer.');
       }
       data.freeDeliveryQuantity = toInt(rawVal);
+    }
+  }
+
+  if (sent('tierDiscounts')) {
+    const raw = body.tierDiscounts;
+    if (!Array.isArray(raw)) {
+      data.tierDiscounts = [];
+    } else {
+      data.tierDiscounts = raw
+        .map((item: any) => ({
+          minQuantity: Math.max(1, parseInt(item.minQuantity, 10) || 1),
+          discountAmount: Math.max(0, parseFloat(item.discountAmount) || 0),
+        }))
+        .filter((item: any) => item.minQuantity > 0 && item.discountAmount > 0);
     }
   }
 

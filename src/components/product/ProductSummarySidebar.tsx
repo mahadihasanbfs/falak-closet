@@ -2,9 +2,9 @@
 
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { Star } from 'lucide-react';
+import { Star, Truck, Gift } from 'lucide-react';
 import { Product, ProductColor } from '@/data/products';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, toBengaliNumber } from '@/lib/utils';
 
 interface ProductSummarySidebarProps {
   product: Product;
@@ -214,6 +214,36 @@ export function ProductSummarySidebar({
           </div>
         )}
       </div>
+
+      {/* Free Delivery Offer Tag */}
+      {product.freeDeliveryQuantity && product.freeDeliveryQuantity > 0 ? (
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs sm:text-sm font-bold shadow-2xs">
+          <Truck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>
+            {product.freeDeliveryQuantity === 1
+              ? '১টি কিনলেই ডেলিভারি ফ্রি!'
+              : `যেকোনো ${toBengaliNumber(product.freeDeliveryQuantity)}টি কিনলেই ডেলিভারি সম্পূর্ণ ফ্রি!`}
+          </span>
+        </div>
+      ) : null}
+
+      {/* Combo Tier Discounts Offer Tag */}
+      {product.tierDiscounts && product.tierDiscounts.length > 0 && (
+        <div className="flex flex-wrap gap-2 pt-0.5">
+          {product.tierDiscounts
+            .filter((t) => t.minQuantity > 0 && t.discountAmount > 0)
+            .sort((a, b) => a.minQuantity - b.minQuantity)
+            .map((tier, idx) => (
+              <div
+                key={idx}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-xs font-bold shadow-2xs"
+              >
+                <Gift className="w-3.5 h-3.5 text-[#A80C14] shrink-0" />
+                <span>{toBengaliNumber(tier.minQuantity)}টি কিনলে {toBengaliNumber(tier.discountAmount)}৳ ছাড়!</span>
+              </div>
+            ))}
+        </div>
+      )}
 
       {/* SUMMARY Section */}
       <div className="pt-4 border-t border-stone-200/80 space-y-5">

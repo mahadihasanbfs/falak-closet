@@ -10,6 +10,12 @@ export function formatCurrency(amount: number): string {
   return `৳${Math.round(amount).toLocaleString('en-IN')}`;
 }
 
+// Convert English digits to Bengali numerals (e.g. 1 -> ১, 2 -> ২)
+export function toBengaliNumber(num: number | string): string {
+  const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+  return String(num).replace(/\d/g, (d) => bengaliDigits[parseInt(d, 10)] ?? d);
+}
+
 /**
  * Normalise a taxonomy value so a name and its slug compare equal.
  *

@@ -484,6 +484,9 @@ function cleanReasonQueryParam() {
     setEditingProduct(null);
     await fetchAllData();
     refreshProductsFromApi();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('falak:products-changed'));
+    }
     setCatalogVersion((v) => v + 1);
     sendProductUpdateNotification({
       type: isEdit ? 'update' : 'create',
@@ -511,6 +514,9 @@ function cleanReasonQueryParam() {
     setProductsList((prev) => prev.map((p) => (p.id === id ? { ...p, stock: newStock } : p)));
     sendProductUpdateNotification({ type: 'update', product: { id, stock: newStock }, id });
     refreshProductsFromApi();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('falak:products-changed'));
+    }
     addToast('info', `Stock updated to ${newStock} pcs.`);
   };
 
@@ -543,6 +549,9 @@ function cleanReasonQueryParam() {
     setProductsList((prev) => prev.filter((p) => p.id !== id));
     sendProductUpdateNotification({ type: 'delete', id });
     refreshProductsFromApi();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('falak:products-changed'));
+    }
     setCatalogVersion((v) => v + 1);
     addToast('warning', 'Product deleted from inventory catalog.');
   };

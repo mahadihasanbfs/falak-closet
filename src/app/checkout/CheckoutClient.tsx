@@ -25,6 +25,7 @@ import {
   Plus,
   Minus
 } from 'lucide-react';
+import { Product } from '@/data/products';
 import { useCart, OrderRecord, DeliverySubArea } from '@/context/CartContext';
 import { useAnalytics } from '@/context/AnalyticsContext';
 import {
@@ -590,9 +591,43 @@ export default function CheckoutClient() {
 
   const effectiveShippingFee = isFreeDeliveryUnlocked ? 0 : calculatedDeliveryFee;
 
+  // Quantity-based combo discount for active checkout items (Cart items or Buy Now item)
+  const activeComboDiscount = useMemo(() => {
+    let total = 0;
+    const prodCounts: Record<string, { product: Product; qty: number }> = {};
+    activeItems.forEach((item) => {
+      const pid = item.product?.id;
+      if (pid && item.product) {
+        if (!prodCounts[pid]) {
+          prodCounts[pid] = { product: item.product, qty: 0 };
+        }
+        prodCounts[pid].qty += (item.quantity ?? 0);
+      }
+    });
+
+    Object.values(prodCounts).forEach(({ product, qty }) => {
+      const tiers = product.tierDiscounts;
+      if (Array.isArray(tiers) && tiers.length > 0) {
+        const sortedTiers = [...tiers]
+          .filter((t) => t.minQuantity > 0 && t.discountAmount > 0)
+          .sort((a, b) => b.minQuantity - a.minQuantity);
+        const matched = sortedTiers.find((t) => qty >= t.minQuantity);
+        if (matched) {
+          total += matched.discountAmount;
+        }
+      }
+    });
+    return total;
+  }, [activeItems]);
+
+  const effectiveDiscountAmount = useMemo(() => {
+    const couponDisc = buyNowItems ? 0 : (appliedCoupon?.calculatedDiscount || 0);
+    return Math.min(subtotal, couponDisc + activeComboDiscount);
+  }, [buyNowItems, appliedCoupon, activeComboDiscount, subtotal]);
+
   const effectiveTotalAmount = useMemo(() => {
-    return Math.max(0, subtotal - (buyNowItems ? 0 : discountAmount) + effectiveShippingFee);
-  }, [subtotal, buyNowItems, discountAmount, effectiveShippingFee]);
+    return Math.max(0, subtotal - effectiveDiscountAmount + effectiveShippingFee);
+  }, [subtotal, effectiveDiscountAmount, effectiveShippingFee]);
 
   const totalAmount = effectiveTotalAmount;
 
@@ -820,7 +855,7 @@ export default function CheckoutClient() {
       const orderPayload: Record<string, unknown> = {
         items: activeItems,
         subtotal,
-        discount: buyNowItems ? 0 : discountAmount,
+        discount: effectiveDiscountAmount,
         shippingFee: effectiveShippingFee,
         courierDeliveryFee: pathaoCourierFee || undefined,
         total: totalAmount,
@@ -1195,10 +1230,16 @@ export default function CheckoutClient() {
                   <span>Subtotal</span>
                   <span className="font-bold text-stone-900">৳ {subtotal}</span>
                 </div>
-                {discountAmount > 0 && (
+                {activeComboDiscount > 0 && (
                   <div className="flex justify-between text-emerald-600 font-bold">
-                    <span>Discount Applied ({appliedCoupon?.code})</span>
-                    <span>-৳ {discountAmount}</span>
+                    <span>Combo Pack Discount</span>
+                    <span>-৳ {activeComboDiscount}</span>
+                  </div>
+                )}
+                {!buyNowItems && appliedCoupon && (appliedCoupon.calculatedDiscount || 0) > 0 && (
+                  <div className="flex justify-between text-emerald-600 font-bold">
+                    <span>Coupon Discount ({appliedCoupon.code})</span>
+                    <span>-৳ {appliedCoupon.calculatedDiscount}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center text-xs">

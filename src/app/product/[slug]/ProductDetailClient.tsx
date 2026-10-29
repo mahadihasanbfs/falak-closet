@@ -219,6 +219,16 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
   const currentStock = activeVariation?.stock ?? product?.stock ?? 10;
   const isOutOfStock = currentStock <= 0;
 
+  // Check active combo tier discount for current quantity
+  const activeDetailComboDiscount = useMemo(() => {
+    if (!product?.tierDiscounts || !Array.isArray(product.tierDiscounts)) return null;
+    const sorted = [...product.tierDiscounts]
+      .filter((t) => t.minQuantity > 0 && t.discountAmount > 0)
+      .sort((a, b) => b.minQuantity - a.minQuantity);
+    const matched = sorted.find((t) => quantity >= t.minQuantity);
+    return matched || null;
+  }, [product?.tierDiscounts, quantity]);
+
   // Per-size stock for the selected color (only when a variation matrix exists)
   const stockForSize = (colorName: string, size: string): number | undefined =>
     product?.variations?.find(
@@ -808,7 +818,24 @@ export default function ProductDetailClient({ initialProduct }: { initialProduct
                   </button>
                 </div>
                 <span className="text-xs text-stone-500">
-                  Subtotal: <strong className="text-stone-900 font-mono">{formatCurrency((currentPrice || product.price || 0) * quantity)}</strong>
+                  Subtotal:{' '}
+                  {activeDetailComboDiscount ? (
+                    <>
+                      <span className="line-through text-stone-400 font-mono mr-1">
+                        {formatCurrency((currentPrice || product.price || 0) * quantity)}
+                      </span>
+                      <strong className="text-[#A80C14] font-mono">
+                        {formatCurrency(Math.max(0, (currentPrice || product.price || 0) * quantity - activeDetailComboDiscount.discountAmount))}
+                      </strong>
+                      <span className="text-emerald-700 font-bold text-[11px] ml-1.5 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        (৳{activeDetailComboDiscount.discountAmount} কম্বো ছাড়!)
+                      </span>
+                    </>
+                  ) : (
+                    <strong className="text-stone-900 font-mono">
+                      {formatCurrency((currentPrice || product.price || 0) * quantity)}
+                    </strong>
+                  )}
                 </span>
               </div>
             </div>

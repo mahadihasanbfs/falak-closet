@@ -4,12 +4,13 @@ import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SmartImage } from '@/components/ui/SmartImage';
-import { Heart, ShoppingBag, Zap, Star } from 'lucide-react';
+import { Heart, ShoppingBag, Zap, Star, Truck, Gift } from 'lucide-react';
 import { Product, type ProductColor } from '@/data/products';
 import { useCart } from '@/context/CartContext';
 import { useAnalytics } from '@/context/AnalyticsContext';
 import { useToast } from '@/components/ui/Toast';
 import { AuthModal } from '@/components/ui/AuthModal';
+import { toBengaliNumber } from '@/lib/utils';
 
 interface ProductCardProps {
   product: Product;
@@ -40,6 +41,15 @@ export function ProductCard({ product, selectedColor }: ProductCardProps) {
   const isWishlisted = isInWishlist(product?.id);
 
   const sizesList = product?.sizes && product.sizes.length > 0 ? product.sizes : ['Free Size'];
+  const freeDeliveryQty = Number(product?.freeDeliveryQuantity) || 0;
+
+  // Active combo tier discounts (sorted by minQuantity ascending)
+  const sortedTierDiscounts = React.useMemo(() => {
+    if (!product?.tierDiscounts || !Array.isArray(product.tierDiscounts)) return [];
+    return [...product.tierDiscounts]
+      .filter((t) => Number(t.minQuantity) > 0 && Number(t.discountAmount) > 0)
+      .sort((a, b) => Number(a.minQuantity) - Number(b.minQuantity));
+  }, [product?.tierDiscounts]);
 
   // Find color object if matched or selected
   const initialColorObj = React.useMemo(() => {
@@ -309,8 +319,34 @@ export function ProductCard({ product, selectedColor }: ProductCardProps) {
             )}
           </div>
 
+          {/* Free Delivery Offer Pill (Buy X -> Free Delivery) */}
+          {freeDeliveryQty > 0 && (
+            <div className="mt-1 flex items-center justify-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-[10px] sm:text-[11px] font-bold tracking-tight shadow-2xs">
+              <Truck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="truncate">
+                {freeDeliveryQty === 1
+                  ? '১টি কিনলেই ডেলিভারি ফ্রি!'
+                  : `${toBengaliNumber(freeDeliveryQty)}টি কিনলে ফ্রি ডেলিভারি`}
+              </span>
+            </div>
+          )}
+
+          {/* Combo Pack / Tier Discount Pill (Buy X -> Save Y) */}
+          {sortedTierDiscounts.length > 0 && (
+            <div className="mt-1 flex items-center justify-center gap-1.5 px-2 py-1 rounded-lg bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] sm:text-[11px] font-bold tracking-tight shadow-2xs animate-in fade-in duration-200">
+              <Gift className="w-3.5 h-3.5 text-[#A80C14] shrink-0" />
+              <span className="truncate">
+                {sortedTierDiscounts.length === 1
+                  ? `${toBengaliNumber(sortedTierDiscounts[0].minQuantity)}টি কিনলে ${toBengaliNumber(sortedTierDiscounts[0].discountAmount)}৳ ছাড়!`
+                  : sortedTierDiscounts.length === 2
+                  ? `${toBengaliNumber(sortedTierDiscounts[0].minQuantity)}টিতে ${toBengaliNumber(sortedTierDiscounts[0].discountAmount)}৳ | ${toBengaliNumber(sortedTierDiscounts[1].minQuantity)}টিতে ${toBengaliNumber(sortedTierDiscounts[1].discountAmount)}৳ ছাড়`
+                  : `${toBengaliNumber(sortedTierDiscounts[0].minQuantity)}টিতে ${toBengaliNumber(sortedTierDiscounts[0].discountAmount)}৳ | ${toBengaliNumber(sortedTierDiscounts[1].minQuantity)}টিতে ${toBengaliNumber(sortedTierDiscounts[1].discountAmount)}৳ (+কম্বো)`}
+              </span>
+            </div>
+          )}
+
           {/* Bottom: Bag + Buy Now (inline sm+) + Color dot | Buy Now full-width on mobile */}
-          <div className="flex  flex-col pt-2.5 mt-2 border-t border-stone-100 gap-2">
+          <div className="flex  flex-col pt-2 mt-1.5 border-t border-stone-100 gap-2">
             {/* Row 1: Bag icon — Buy Now pill (sm+ only) — color dot */}
             <div className="flex justify-around items-center gap-[1.2px]">
               {/* Add to Cart bag */}

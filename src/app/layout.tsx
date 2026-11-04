@@ -125,7 +125,7 @@ export default async function RootLayout({
   const { products, error: productsError } = await getProductsSafe();
 
   return (
-    <html lang="en" className={`${playfair.variable} ${inter.variable} ${hindSiliguri.variable}`}>
+    <html lang="en" className={`${playfair.variable} ${inter.variable} ${hindSiliguri.variable}`} suppressHydrationWarning>
       <head>
         {/* Fonts are self-hosted via next/font (Playfair, Inter, Hind Siliguri) —
             no Google Fonts <link> is needed. A previous link to the (non-Google-Fonts)
@@ -140,7 +140,7 @@ export default async function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(webSiteSchema) }}
         />
       </head>
-      <body className="bg-[#FAFAFA] text-stone-900 antialiased selection:bg-[#A80C14] selection:text-white">
+      <body className="bg-[#FAFAFA] text-stone-900 antialiased selection:bg-[#A80C14] selection:text-white" suppressHydrationWarning>
         <Suspense fallback={null}>
           <TopProgressBar />
         </Suspense>
@@ -148,7 +148,7 @@ export default async function RootLayout({
         <GoogleTagManager />
         <AnalyticsProvider>
           <ToastProvider>
-            <CartProvider initialProducts={products} initialProductsError={productsError}>
+            <CartProvider initialProducts={products} initialProductsError={productsError} initialAnnouncement={announcement}>
               <div className="flex flex-col min-h-screen">
                 <AnnouncementBar announcement={announcement} />
                 <Header />

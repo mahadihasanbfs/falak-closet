@@ -98,7 +98,11 @@ export function CartDrawer() {
   const selectedTotalAmount = Math.max(0, selectedSubtotal - selectedDiscountAmount + selectedShippingFee);
 
   const remainingForFreeShipping = hasFreeThreshold ? Math.max(0, freeShippingThreshold - selectedSubtotal) : 0;
-  const drawerProgress = hasFreeThreshold && selectedSubtotal > 0
+  const drawerProgress = isFreeDeliveryUnlocked
+    ? 100
+    : quantityFreeDelivery && quantityFreeDelivery.requiredQty > 0
+    ? Math.min(100, (quantityFreeDelivery.currentQty / quantityFreeDelivery.requiredQty) * 100)
+    : hasFreeThreshold && selectedSubtotal > 0
     ? Math.min(100, (selectedSubtotal / freeShippingThreshold) * 100)
     : 0;
 
@@ -138,15 +142,23 @@ export function CartDrawer() {
                 {isFreeDeliveryUnlocked ? (
                   <span className="text-emerald-600 dark:text-emerald-400 font-bold">
                     {quantityFreeDelivery?.unlocked
-                      ? `🎉 Free Delivery unlocked via "${quantityFreeDelivery.productName}" Qty! 🚚`
+                      ? quantityFreeDelivery.isAnnouncementOffer
+                        ? `🎉 Free Delivery unlocked for buying ${quantityFreeDelivery.requiredQty}+ ${quantityFreeDelivery.categoryName || 'Hijab'}s! 🚚`
+                        : `🎉 Free Delivery unlocked via "${quantityFreeDelivery.productName}" Qty! 🚚`
                       : '🎉 You unlocked FREE Express Shipping!'}
                   </span>
                 ) : (
                   <span>
                     {quantityFreeDelivery ? (
-                      <span>
-                        Buy <strong className="text-[#A80C14]">{quantityFreeDelivery.requiredQty - quantityFreeDelivery.currentQty}</strong> more of <strong className="text-stone-900 dark:text-stone-100">"{quantityFreeDelivery.productName}"</strong> for FREE Delivery!
-                      </span>
+                      quantityFreeDelivery.isAnnouncementOffer ? (
+                        <span>
+                          Buy <strong className="text-[#A80C14] dark:text-[#F87171]">{Math.max(1, quantityFreeDelivery.requiredQty - quantityFreeDelivery.currentQty)}</strong> more {quantityFreeDelivery.categoryName || 'Hijab'}s for <strong className="text-emerald-600 dark:text-emerald-400 font-bold">FREE Delivery!</strong>
+                        </span>
+                      ) : (
+                        <span>
+                          Buy <strong className="text-[#A80C14]">{quantityFreeDelivery.requiredQty - quantityFreeDelivery.currentQty}</strong> more of <strong className="text-stone-900 dark:text-stone-100">"{quantityFreeDelivery.productName}"</strong> for FREE Delivery!
+                        </span>
+                      )
                     ) : (
                       <span>
                         Add <strong className="text-amber-700 dark:text-amber-400">{formatCurrency(remainingForFreeShipping)}</strong> more for FREE Shipping
@@ -155,13 +167,13 @@ export function CartDrawer() {
                   </span>
                 )}
               </span>
-              {hasFreeThreshold && (
-                <span className="text-[11px] text-stone-500 font-mono">
+              {(hasFreeThreshold || quantityFreeDelivery) && (
+                <span className="text-[11px] text-stone-500 font-mono font-bold">
                   {isFreeDeliveryUnlocked ? '100%' : `${Math.round(drawerProgress)}%`}
                 </span>
               )}
             </div>
-            {hasFreeThreshold && (
+            {(hasFreeThreshold || quantityFreeDelivery) && (
               <div className="w-full bg-stone-200 dark:bg-stone-700 h-2 rounded-full overflow-hidden">
                 <div
                   className="bg-gradient-to-r from-amber-500 to-emerald-500 h-full transition-all duration-500 rounded-full"
@@ -382,8 +394,8 @@ export function CartDrawer() {
               )}
             </div>
 
-            <p className="text-[10px] text-stone-400 text-center flex items-center justify-center gap-1">
-              <ShieldCheck className="w-3 h-3 text-emerald-500" /> Guaranteed 256-Bit Encrypted Secure Checkout
+            <p className="text-[10px] text-stone-500 text-center flex items-center justify-center gap-1">
+              <ShieldCheck className="w-3 h-3 text-emerald-500" /> গেস্ট চেকআউট · একাউন্ট ছাড়াই সরাসরি অর্ডার করুন
             </p>
           </div>
         )}

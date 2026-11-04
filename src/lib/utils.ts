@@ -16,6 +16,15 @@ export function toBengaliNumber(num: number | string): string {
   return String(num).replace(/\d/g, (d) => bengaliDigits[parseInt(d, 10)] ?? d);
 }
 
+// Convert Bengali numerals to English digits (e.g. ১ -> 1, ২ -> 2)
+export function toEnglishNumber(str: number | string): string {
+  const bengaliToEnglish: Record<string, string> = {
+    '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4',
+    '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9',
+  };
+  return String(str ?? '').replace(/[০-৯]/g, (d) => bengaliToEnglish[d] ?? d);
+}
+
 /**
  * Normalise a taxonomy value so a name and its slug compare equal.
  *

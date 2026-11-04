@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { buildOrderData, serializeOrder, OrderValidationError, adjustStockForOrderItems } from '@/lib/orders';
 import { evaluatePromotion } from '@/lib/promotions';
 import { getPathaoDeliveryFee, calculateOrderWeight } from '@/lib/shipping/pathao';
-import { getStoreSettingsSafe } from '@/lib/siteSettings';
+import { getStoreSettingsSafe, getAnnouncementSafe } from '@/lib/siteSettings';
 import { checkIsFreeDelivery, calculateShippingFee } from '@/lib/shipping/locationBilingual';
 import { broadcastSocketEventServer } from '@/lib/socketServerBroadcast';
 
@@ -170,10 +170,12 @@ export async function POST(req: Request) {
     const subtotal = data.subtotal;
 
     const storeSettings = await getStoreSettingsSafe();
+    const announcement = await getAnnouncementSafe();
     const isFreeShipping = checkIsFreeDelivery(
       data.items as any,
       subtotal,
-      storeSettings.freeShippingThreshold
+      storeSettings.freeShippingThreshold,
+      announcement
     );
 
     // Calculate customer delivery fee based on standard store rates:
@@ -188,6 +190,7 @@ export async function POST(req: Request) {
       freeShippingThreshold: storeSettings.freeShippingThreshold,
       isFreeDelivery: isFreeShipping,
       items: data.items as any,
+      announcement,
     });
 
     data.shippingFee = isFreeShipping ? 0 : shippingCalc.fee;

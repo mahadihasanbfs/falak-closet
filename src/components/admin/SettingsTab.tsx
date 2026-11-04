@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Database, RefreshCw, CheckCircle2, KeyRound, CloudUpload, Phone, Megaphone, ListChecks, Trash2, Plus } from 'lucide-react';
+import { Settings, Database, RefreshCw, CheckCircle2, KeyRound, CloudUpload, Phone, Megaphone, ListChecks, Trash2, Plus, Truck, Eye, EyeOff } from 'lucide-react';
 import { uploadImages } from '@/lib/cloudinary';
+import { toEnglishNumber } from '@/lib/utils';
 import type { Product } from '@/data/products';
 
 interface SettingsTabProps {
@@ -18,7 +19,7 @@ export function SettingsTab({
   isSeeding,
   seedResult
 }: SettingsTabProps) {
-  const [freeShippingThreshold, setFreeShippingThreshold] = useState(100);
+  const [freeShippingThreshold, setFreeShippingThreshold] = useState<number | string>(0);
   const [isSavingStore, setIsSavingStore] = useState(false);
   const [storeSavedSuccess, setStoreSavedSuccess] = useState(false);
   const [storeError, setStoreError] = useState<string | null>(null);
@@ -100,9 +101,17 @@ export function SettingsTab({
     }
   };
 
+  const [isSavingOffer, setIsSavingOffer] = useState(false);
+  const [offerSavedSuccess, setOfferSavedSuccess] = useState(false);
+  const [offerError, setOfferError] = useState<string | null>(null);
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!Number.isFinite(freeShippingThreshold) || freeShippingThreshold < 0) {
+    const parsed = typeof freeShippingThreshold === 'string'
+      ? (freeShippingThreshold.trim() === '' ? 0 : parseInt(freeShippingThreshold.trim(), 10))
+      : freeShippingThreshold;
+
+    if (!Number.isFinite(parsed) || parsed < 0) {
       setStoreError('Free delivery threshold must be a non-negative number.');
       return;
     }
@@ -112,18 +121,36 @@ export function SettingsTab({
     setStoreSavedSuccess(false);
 
     try {
+      const minQty = typeof announcementForm.freeDeliveryMinQty === 'string'
+        ? (parseInt(announcementForm.freeDeliveryMinQty.trim(), 10) || 1)
+        : (announcementForm.freeDeliveryMinQty || 1);
+
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           key: 'store',
           value: {
-            freeShippingThreshold,
+            freeShippingThreshold: parsed,
             currencySymbol: '৳ BDT'
           }
         })
       });
       const data = await res.json();
+
+      // Also persist the delivery offer rules
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'announcement',
+          value: {
+            ...announcementForm,
+            freeDeliveryMinQty: minQty
+          }
+        })
+      });
+
       if (data.success) {
         setStoreSavedSuccess(true);
         window.dispatchEvent(new Event('falak:settings-changed'));
@@ -135,6 +162,42 @@ export function SettingsTab({
       setStoreError('Network error — failed to save settings.');
     } finally {
       setIsSavingStore(false);
+    }
+  };
+
+  const handleSaveDeliveryOffer = async () => {
+    const minQty = typeof announcementForm.freeDeliveryMinQty === 'string'
+      ? (parseInt(announcementForm.freeDeliveryMinQty.trim(), 10) || 1)
+      : (announcementForm.freeDeliveryMinQty || 1);
+
+    setIsSavingOffer(true);
+    setOfferError(null);
+    setOfferSavedSuccess(false);
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: 'announcement',
+          value: {
+            ...announcementForm,
+            freeDeliveryMinQty: minQty
+          }
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOfferSavedSuccess(true);
+        window.dispatchEvent(new Event('falak:settings-changed'));
+        setTimeout(() => setOfferSavedSuccess(false), 3000);
+      } else {
+        setOfferError(data.error || 'Failed to save delivery offer.');
+      }
+    } catch {
+      setOfferError('Network error — failed to save delivery offer.');
+    } finally {
+      setIsSavingOffer(false);
     }
   };
 
@@ -282,7 +345,15 @@ export function SettingsTab({
   };
 
   // ── Announcement bar ──────────────────────────────────────────────
-  const [announcementForm, setAnnouncementForm] = useState({ message: '', link: '', linkLabel: '', isActive: false });
+  const [announcementForm, setAnnouncementForm] = useState({
+    message: '',
+    link: '',
+    linkLabel: '',
+    isActive: false,
+    freeDeliveryOffer: true,
+    freeDeliveryMinQty: 8 as number | string,
+    freeDeliveryCategory: 'Hijab',
+  });
   const [isSavingAnnouncement, setIsSavingAnnouncement] = useState(false);
   const [announcementSaved, setAnnouncementSaved] = useState(false);
   const [announcementError, setAnnouncementError] = useState<string | null>(null);
@@ -293,11 +364,17 @@ export function SettingsTab({
       const data = await res.json();
       if (data.success && data.setting) {
         const v = data.setting.value;
+        const msg = v.message || '';
         setAnnouncementForm({
-          message: v.message || '',
+          message: msg,
           link: v.link || '',
           linkLabel: v.linkLabel || '',
-          isActive: Boolean(v.isActive)
+          isActive: Boolean(v.isActive),
+          freeDeliveryOffer: typeof v.freeDeliveryOffer === 'boolean'
+            ? v.freeDeliveryOffer
+            : /free|delivery|ডেলিভারি/i.test(msg),
+          freeDeliveryMinQty: Number(v.freeDeliveryMinQty) || 8,
+          freeDeliveryCategory: v.freeDeliveryCategory || 'Hijab',
         });
       }
     } catch (e) {
@@ -314,6 +391,10 @@ export function SettingsTab({
       return;
     }
 
+    const minQty = typeof announcementForm.freeDeliveryMinQty === 'string'
+      ? (parseInt(announcementForm.freeDeliveryMinQty.trim(), 10) || 1)
+      : (announcementForm.freeDeliveryMinQty || 1);
+
     setIsSavingAnnouncement(true);
     setAnnouncementError(null);
     setAnnouncementSaved(false);
@@ -327,13 +408,17 @@ export function SettingsTab({
             message: announcementForm.message.trim(),
             link,
             linkLabel: announcementForm.linkLabel.trim(),
-            isActive: announcementForm.isActive
+            isActive: announcementForm.isActive,
+            freeDeliveryOffer: announcementForm.freeDeliveryOffer,
+            freeDeliveryMinQty: minQty,
+            freeDeliveryCategory: announcementForm.freeDeliveryCategory,
           }
         })
       });
       const data = await res.json();
       if (data.success) {
         setAnnouncementSaved(true);
+        window.dispatchEvent(new Event('falak:settings-changed'));
         setTimeout(() => setAnnouncementSaved(false), 3000);
       } else {
         setAnnouncementError(data.error || 'Failed to save announcement.');
@@ -532,11 +617,14 @@ export function SettingsTab({
           <div className="space-y-1.5">
             <label className="font-bold text-stone-700">Free Delivery Threshold (৳ BDT)</label>
             <input
-              type="number"
-              min={0}
-              required
+              type="text"
+              inputMode="numeric"
               value={freeShippingThreshold}
-              onChange={(e) => setFreeShippingThreshold(Number(e.target.value))}
+              onChange={(e) => {
+                const cleaned = toEnglishNumber(e.target.value).replace(/[^0-9]/g, '');
+                setFreeShippingThreshold(cleaned);
+              }}
+              placeholder="0"
               className="w-full px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 font-mono focus:outline-none focus:ring-1 focus:ring-stone-900"
             />
             <p className="text-[10px] text-stone-500">
@@ -555,6 +643,92 @@ export function SettingsTab({
             </button>
           </div>
         </form>
+
+        {/* Cart Free Delivery Promotion Rule placed under Save Configuration button */}
+        <div className="pt-5 border-t border-stone-200/80 space-y-4 text-xs">
+          {offerSavedSuccess && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-bold flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>কার্ট ফ্রি ডেলিভারি অফার সফলভাবে সংরক্ষিত হয়েছে!</span>
+            </div>
+          )}
+
+          {offerError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-bold">
+              {offerError}
+            </div>
+          )}
+
+          <div className="p-4 bg-stone-50 border border-stone-200/80 rounded-2xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Truck className="w-4 h-4 text-[#A80C14]" />
+                  <span className="font-bold text-stone-900 text-xs">কার্ট ফ্রি ডেলিভারি অফার (Free Delivery Offer on Cart)</span>
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  নির্দিষ্ট সংখ্যক প্রোডাক্ট/হিজাব কার্টে যোগ করলে ক্রেতা ফ্রি ডেলিভারি চার্জ সুবিধা পাবে।
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAnnouncementForm({ ...announcementForm, freeDeliveryOffer: !announcementForm.freeDeliveryOffer })}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${announcementForm.freeDeliveryOffer
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                  : 'bg-stone-200 text-stone-600 border-stone-300'
+                }`}
+              >
+                {announcementForm.freeDeliveryOffer ? '✓ সক্রিয় (Active)' : 'বন্ধ (Inactive)'}
+              </button>
+            </div>
+
+            {announcementForm.freeDeliveryOffer && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-stone-200/60">
+                <div className="space-y-1">
+                  <label className="font-bold text-stone-700 text-[11px]">মিনিমাম কোয়ান্টিটি (Minimum Quantity)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={announcementForm.freeDeliveryMinQty}
+                    onChange={(e) => {
+                      const cleaned = toEnglishNumber(e.target.value).replace(/[^0-9]/g, '');
+                      setAnnouncementForm({ ...announcementForm, freeDeliveryMinQty: cleaned });
+                    }}
+                    placeholder="8"
+                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-stone-900"
+                  />
+                  <p className="text-[10px] text-stone-400">উদা: ৮ দিলে যেকোনো ৮টি কিনলেই ডেলিভারি চার্জ ফ্রি দেখাবে।</p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-stone-700 text-[11px]">প্রযোজ্য পণ্য / ক্যাটাগরি (Applicable To)</label>
+                  <select
+                    value={announcementForm.freeDeliveryCategory}
+                    onChange={(e) => setAnnouncementForm({ ...announcementForm, freeDeliveryCategory: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-1 focus:ring-stone-900 cursor-pointer"
+                  >
+                    <option value="Hijab">Hijab (যেকোনো হিজাব)</option>
+                    <option value="all">All Products (সকল প্রোডাক্ট)</option>
+                  </select>
+                  <p className="text-[10px] text-stone-400">কার্টে মোট যেকোনো ৮টি হিজাব হলেই ফ্রি চার্জ কার্যকর হবে।</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={handleSaveDeliveryOffer}
+              disabled={isSavingOffer}
+              className="px-5 py-2.5 bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50 flex items-center gap-2"
+            >
+              <Truck className="w-3.5 h-3.5 text-[#F5C77E]" />
+              <span>{isSavingOffer ? 'Saving Offer…' : 'Save Delivery Offer'}</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* bKash Payment Settings */}
@@ -689,17 +863,43 @@ export function SettingsTab({
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="font-bold text-stone-700">Visibility</label>
+          {/* Storefront Visibility Toggle Card */}
+          <div className="p-4 bg-stone-50 border border-stone-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                {announcementForm.isActive ? (
+                  <Eye className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <EyeOff className="w-4 h-4 text-stone-400" />
+                )}
+                <span className="font-bold text-stone-900 text-xs">
+                  স্টোরফ্রন্ট ভিজিবিলিটি (Storefront Visibility)
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-500">
+                {announcementForm.isActive
+                  ? 'অ্যানাউন্সমেন্ট বারটি বর্তমানে ওয়েবসাইটে ক্রেতাদের নিকট প্রদর্শিত হচ্ছে।'
+                  : 'অ্যানাউন্সমেন্ট বারটি বর্তমানে ওয়েবসাইটে লুকায়িত (Hidden) রাখা হয়েছে।'}
+              </p>
+            </div>
+
             <button
               type="button"
               onClick={() => setAnnouncementForm({ ...announcementForm, isActive: !announcementForm.isActive })}
-              className={`w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${announcementForm.isActive
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : 'bg-stone-50 text-stone-500 border-stone-200'
-                }`}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center justify-center gap-1.5 shrink-0 ${
+                announcementForm.isActive
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-xs'
+                  : 'bg-stone-200 hover:bg-stone-300 text-stone-700 border-stone-300'
+              }`}
             >
-              {announcementForm.isActive ? '✓ Visible on storefront' : 'Hidden from storefront'}
+              {announcementForm.isActive ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>সক্রিয় (Visible)</span>
+                </>
+              ) : (
+                <span>লুকায়িত (Hidden)</span>
+              )}
             </button>
           </div>
 

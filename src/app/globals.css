@@ -104,3 +104,56 @@
     margin: 10mm;
   }
 }
+
+/* Landing page: gold CTA that shakes and pulses to draw the eye */
+.lp-cta {
+  background: linear-gradient(180deg, #ebc862, #c99a2e 55%, #a67c1a);
+  color: #2a1d07;
+  border: 1px solid #f6e3a1;
+  box-shadow: 0 8px 20px rgba(150, 110, 20, 0.4);
+  animation: lp-shake 3.2s ease-in-out infinite, lp-pop 1.6s ease-in-out infinite;
+}
+.lp-cta:hover { filter: brightness(1.08); }
+.lp-cta:disabled { animation: none; }
+@keyframes lp-pop {
+  0%, 100% { box-shadow: 0 8px 20px rgba(150, 110, 20, 0.4), 0 0 0 0 rgba(201, 154, 46, 0.55); }
+  50% { box-shadow: 0 8px 20px rgba(150, 110, 20, 0.4), 0 0 0 14px rgba(201, 154, 46, 0); }
+}
+@keyframes lp-shake {
+  0%, 70%, 100% { transform: translateX(0) scale(1); }
+  74% { transform: translateX(-5px) rotate(-0.6deg) scale(1.03); }
+  78% { transform: translateX(5px) rotate(0.6deg) scale(1.03); }
+  82% { transform: translateX(-4px) scale(1.03); }
+  86% { transform: translateX(4px) scale(1.03); }
+  90% { transform: translateX(-2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-cta { animation: none; }
+}
+
+/* Landing page typography + ornaments */
+.lp-display { font-family: var(--lp-display), Georgia, serif; }
+.lp-framed { position: relative; }
+.lp-framed::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border: 1.5px solid #c99a2e;
+  border-radius: 22px;
+  pointer-events: none;
+  opacity: 0.7;
+  -webkit-mask:
+    linear-gradient(#000 0 0) top left / 46px 46px no-repeat,
+    linear-gradient(#000 0 0) top right / 46px 46px no-repeat,
+    linear-gradient(#000 0 0) bottom left / 46px 46px no-repeat,
+    linear-gradient(#000 0 0) bottom right / 46px 46px no-repeat;
+  mask:
+    linear-gradient(#000 0 0) top left / 46px 46px no-repeat,
+    linear-gradient(#000 0 0) top right / 46px 46px no-repeat,
+    linear-gradient(#000 0 0) bottom left / 46px 46px no-repeat,
+    linear-gradient(#000 0 0) bottom right / 46px 46px no-repeat;
+}
+.lp-divider { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; color: #c99a2e; }
+.lp-divider::before { content: ""; height: 1px; flex: 1; background: linear-gradient(90deg, transparent, #c99a2e); }
+.lp-divider::after { content: ""; height: 1px; flex: 1; background: linear-gradient(270deg, transparent, #c99a2e); }
+.lp-divider svg { width: 18px; height: 18px; fill: #c99a2e; }

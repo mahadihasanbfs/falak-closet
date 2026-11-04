@@ -7,6 +7,7 @@ import { useWishlist } from '@/hooks/useWishlist';
 import { sendNewOrderNotification, isSocketEnabled, getSocket } from '@/lib/socketClient';
 import { getProductVariationPrice } from '@/lib/utils';
 import { checkIsFreeDelivery } from '@/lib/shipping/locationBilingual';
+import type { Announcement } from '@/lib/siteSettings';
 
 export interface CartItem {
   product: Product;
@@ -128,7 +129,15 @@ interface CartContextType {
   setSelectedZone: (zoneId: string, subAreaId?: string | null) => void;
   selectedZoneName: string;
   selectedSubAreaName: string | null;
-  quantityFreeDelivery: { unlocked: boolean; productName: string; requiredQty: number; currentQty: number } | null;
+  announcement: Announcement | null;
+  quantityFreeDelivery: {
+    unlocked: boolean;
+    productName: string;
+    requiredQty: number;
+    currentQty: number;
+    isAnnouncementOffer?: boolean;
+    categoryName?: string;
+  } | null;
 
   // Wishlist
   wishlist: Product[];
@@ -173,11 +182,13 @@ export function CartProvider({
   children,
   initialProducts = [],
   initialProductsError = null,
+  initialAnnouncement = null,
 }: {
   children: React.ReactNode;
   /** Server-rendered catalog from the root layout. Keeps the first paint free of a fetch waterfall. */
   initialProducts?: Product[];
   initialProductsError?: string | null;
+  initialAnnouncement?: Announcement | null;
 }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
@@ -234,6 +245,8 @@ export function CartProvider({
 
   // Admin-configured free delivery threshold (Settings → Store Configuration).
   const [freeShippingThreshold, setFreeShippingThreshold] = useState(FREE_SHIPPING_MIN);
+  // Announcement settings (Settings → Announcement Bar)
+  const [announcement, setAnnouncement] = useState<Announcement | null>(initialAnnouncement ?? null);
 
   const fetchStoreSettings = async () => {
     try {
@@ -249,9 +262,38 @@ export function CartProvider({
     }
   };
 
+  const fetchAnnouncement = async () => {
+    try {
+      const res = await fetch('/api/settings?key=announcement', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success && data.setting?.value) {
+        const v = data.setting.value;
+        const msg = typeof v.message === 'string' ? v.message.trim() : '';
+        setAnnouncement({
+          message: msg,
+          link: typeof v.link === 'string' ? v.link.trim() : '',
+          linkLabel: typeof v.linkLabel === 'string' ? v.linkLabel.trim() : '',
+          isActive: v.isActive === true,
+          freeDeliveryOffer: typeof v.freeDeliveryOffer === 'boolean'
+            ? v.freeDeliveryOffer
+            : /free|delivery|ডেলিভারি/i.test(msg),
+          freeDeliveryMinQty: Number(v.freeDeliveryMinQty) || 8,
+          freeDeliveryCategory: typeof v.freeDeliveryCategory === 'string' ? v.freeDeliveryCategory : 'Hijab',
+        });
+      }
+    } catch (e) {
+      console.error('Failed to fetch announcement settings:', e);
+    }
+  };
+
   useEffect(() => {
-    window.addEventListener('falak:settings-changed', fetchStoreSettings);
-    return () => window.removeEventListener('falak:settings-changed', fetchStoreSettings);
+    fetchAnnouncement();
+    const handleSettingsChanged = () => {
+      fetchStoreSettings();
+      fetchAnnouncement();
+    };
+    window.addEventListener('falak:settings-changed', handleSettingsChanged);
+    return () => window.removeEventListener('falak:settings-changed', handleSettingsChanged);
   }, []);
 
   const fetchDeliveryZones = async () => {
@@ -725,37 +767,85 @@ export function CartProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [subtotal, appliedCoupon?.code]);
 
-  // Sum quantities by product ID
+  // Sum quantities by product ID and eligible category
   const quantitiesByProductId: Record<string, number> = {};
+  let totalEligibleCategoryQty = 0;
+  const isAnnouncementOfferActive = Boolean(
+    announcement &&
+    announcement.isActive !== false &&
+    announcement.freeDeliveryOffer !== false
+  );
+  const targetCategory = (announcement?.freeDeliveryCategory || 'hijab').toLowerCase();
+  const announcementMinQty =
+    typeof announcement?.freeDeliveryMinQty === 'number' && announcement.freeDeliveryMinQty > 0
+      ? announcement.freeDeliveryMinQty
+      : 8;
+
   cart.forEach((item) => {
     const pid = item.product?.id;
+    const qty = item.quantity ?? 0;
     if (pid) {
-      quantitiesByProductId[pid] = (quantitiesByProductId[pid] || 0) + (item.quantity ?? 0);
+      quantitiesByProductId[pid] = (quantitiesByProductId[pid] || 0) + qty;
+    }
+    if (isAnnouncementOfferActive) {
+      if (targetCategory === 'all') {
+        totalEligibleCategoryQty += qty;
+      } else {
+        const cat = (item.product?.category || '').toLowerCase();
+        const subCat = (item.product?.subCategory || '').toLowerCase();
+        const name = (item.product?.name || '').toLowerCase();
+        if (cat === targetCategory || subCat.includes(targetCategory) || name.includes(targetCategory)) {
+          totalEligibleCategoryQty += qty;
+        }
+      }
     }
   });
 
-  let quantityFreeDelivery: { unlocked: boolean; productName: string; requiredQty: number; currentQty: number } | null = null;
+  let quantityFreeDelivery: {
+    unlocked: boolean;
+    productName: string;
+    requiredQty: number;
+    currentQty: number;
+    isAnnouncementOffer?: boolean;
+    categoryName?: string;
+  } | null = null;
 
-  for (const item of cart) {
-    const prod = item.product;
-    const reqQty = prod?.freeDeliveryQuantity;
-    if (prod && typeof reqQty === 'number' && reqQty > 0) {
-      const currentQty = quantitiesByProductId[prod.id] || 0;
-      if (currentQty >= reqQty) {
-        quantityFreeDelivery = {
-          unlocked: true,
-          productName: prod.name,
-          requiredQty: reqQty,
-          currentQty
-        };
-        break;
-      } else {
-        if (!quantityFreeDelivery || (currentQty / reqQty > quantityFreeDelivery.currentQty / quantityFreeDelivery.requiredQty)) {
+  // Check announcement offer first (store-wide category quantity offer)
+  if (isAnnouncementOfferActive && (cart.length > 0 || totalEligibleCategoryQty > 0)) {
+    const categoryLabel = targetCategory === 'hijab' ? 'Hijab' : 'Product';
+    quantityFreeDelivery = {
+      unlocked: totalEligibleCategoryQty >= announcementMinQty,
+      productName: `Any ${announcementMinQty} ${categoryLabel}s Offer`,
+      requiredQty: announcementMinQty,
+      currentQty: totalEligibleCategoryQty,
+      isAnnouncementOffer: true,
+      categoryName: categoryLabel,
+    };
+  }
+
+  // If announcement offer isn't unlocked, check if any product-level rule is unlocked
+  if (!quantityFreeDelivery || !quantityFreeDelivery.unlocked) {
+    for (const item of cart) {
+      const prod = item.product;
+      const reqQty = prod?.freeDeliveryQuantity;
+      if (prod && typeof reqQty === 'number' && reqQty > 0) {
+        const currentQty = quantitiesByProductId[prod.id] || 0;
+        if (currentQty >= reqQty) {
+          quantityFreeDelivery = {
+            unlocked: true,
+            productName: prod.name,
+            requiredQty: reqQty,
+            currentQty,
+            isAnnouncementOffer: false,
+          };
+          break;
+        } else if (!quantityFreeDelivery) {
           quantityFreeDelivery = {
             unlocked: false,
             productName: prod.name,
             requiredQty: reqQty,
-            currentQty
+            currentQty,
+            isAnnouncementOffer: false,
           };
         }
       }
@@ -779,7 +869,7 @@ export function CartProvider({
     ? Math.min(100, (subtotal / freeShippingThreshold) * 100)
     : 0;
 
-  const isFreeDelivery = checkIsFreeDelivery(cart, subtotal, freeShippingThreshold);
+  const isFreeDelivery = checkIsFreeDelivery(cart, subtotal, freeShippingThreshold, announcement);
 
   const shippingFee = subtotal === 0 || isFreeDelivery ? 0 : baseFee;
   const totalAmount = Math.max(0, subtotal - discountAmount + shippingFee);
@@ -885,6 +975,7 @@ export function CartProvider({
         setSelectedZone,
         selectedZoneName,
         selectedSubAreaName,
+        announcement,
         quantityFreeDelivery,
         wishlist,
         toggleWishlist,

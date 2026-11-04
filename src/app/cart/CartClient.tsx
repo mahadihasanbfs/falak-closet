@@ -174,53 +174,57 @@ export default function CartClient() {
       </div>
 
       {/* Free Shipping Progress Indicator */}
-      {((freeShippingThreshold > 0 && freeShippingThreshold < Infinity) || quantityFreeDelivery) && (
-        <div className="p-4 sm:p-5 bg-white rounded-2xl sm:rounded-3xl border border-[#F8D2D5] shadow-xs space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs sm:text-sm font-bold">
-            <span className="flex items-start sm:items-center gap-2 text-stone-900 leading-snug">
-              <span className="p-1.5 bg-[#FDF2F3] text-[#A80C14] rounded-full border border-[#F8D2D5] shrink-0 mt-0.5 sm:mt-0">
-                <Truck className="w-4 h-4" />
-              </span>
-              {freeShippingProgress >= 100 || quantityFreeDelivery?.unlocked ? (
-                <strong className="text-emerald-700 font-semibold">
-                  {quantityFreeDelivery?.unlocked
-                    ? `Congratulations! You unlocked FREE Delivery via "${quantityFreeDelivery.productName}" Qty! 🚚`
-                    : 'Congratulations! You unlocked FREE Nationwide Delivery! 🎉'}
-                </strong>
-              ) : (
-                <span>
-                  {quantityFreeDelivery ? (
-                    <span>
-                      Buy <strong className="text-[#A80C14] font-mono text-sm">{quantityFreeDelivery.requiredQty - quantityFreeDelivery.currentQty}</strong> more of <strong className="text-stone-900">"{quantityFreeDelivery.productName}"</strong> for FREE Delivery!
-                    </span>
-                  ) : (
-                    <span>Add <strong className="text-[#A80C14] font-mono text-sm">{formatCurrency(freeShippingThreshold - subtotal)}</strong> more for FREE Shipping!</span>
-                  )}
-                </span>
-              )}
-            </span>
-            {freeShippingThreshold > 0 && freeShippingThreshold < Infinity && (
-              <span className="self-end sm:self-auto font-mono text-xs font-bold text-stone-700 bg-stone-100 border border-stone-200 px-2.5 py-1 rounded-full shrink-0">
-                {freeShippingProgress >= 100 || quantityFreeDelivery?.unlocked
-                  ? '100%'
-                  : `${Math.round(freeShippingProgress)}%`}
-              </span>
-            )}
-          </div>
+      {((freeShippingThreshold > 0 && freeShippingThreshold < Infinity) || quantityFreeDelivery) && (() => {
+        const effectiveProgress = quantityFreeDelivery?.unlocked || freeShippingProgress >= 100
+          ? 100
+          : quantityFreeDelivery && quantityFreeDelivery.requiredQty > 0
+          ? Math.min(100, (quantityFreeDelivery.currentQty / quantityFreeDelivery.requiredQty) * 100)
+          : freeShippingProgress;
 
-          {freeShippingThreshold > 0 && freeShippingThreshold < Infinity && (
+        return (
+          <div className="p-4 sm:p-5 bg-white rounded-2xl sm:rounded-3xl border border-[#F8D2D5] shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs sm:text-sm font-bold">
+              <span className="flex items-start sm:items-center gap-2 text-stone-900 leading-snug">
+                <span className="p-1.5 bg-[#FDF2F3] text-[#A80C14] rounded-full border border-[#F8D2D5] shrink-0 mt-0.5 sm:mt-0">
+                  <Truck className="w-4 h-4" />
+                </span>
+                {effectiveProgress >= 100 || quantityFreeDelivery?.unlocked ? (
+                  <strong className="text-emerald-700 font-semibold">
+                    {quantityFreeDelivery?.unlocked
+                      ? quantityFreeDelivery.isAnnouncementOffer
+                        ? `Congratulations! You unlocked FREE Delivery for buying ${quantityFreeDelivery.requiredQty}+ ${quantityFreeDelivery.categoryName || 'Hijab'}s! 🚚`
+                        : `Congratulations! You unlocked FREE Delivery via "${quantityFreeDelivery.productName}" Qty! 🚚`
+                      : 'Congratulations! You unlocked FREE Nationwide Delivery! 🎉'}
+                  </strong>
+                ) : (
+                  <span>
+                    {quantityFreeDelivery ? (
+                      quantityFreeDelivery.isAnnouncementOffer ? (
+                        <span>
+                          Buy <strong className="text-[#A80C14] font-mono text-sm">{Math.max(1, quantityFreeDelivery.requiredQty - quantityFreeDelivery.currentQty)}</strong> more {quantityFreeDelivery.categoryName || 'Hijab'}s for <strong className="text-emerald-700 font-semibold">FREE Delivery!</strong>
+                        </span>
+                      ) : (
+                        <span>
+                          Buy <strong className="text-[#A80C14] font-mono text-sm">{quantityFreeDelivery.requiredQty - quantityFreeDelivery.currentQty}</strong> more of <strong className="text-stone-900">"{quantityFreeDelivery.productName}"</strong> for FREE Delivery!
+                        </span>
+                      )
+                    ) : (
+                      <span>Add <strong className="text-[#A80C14] font-mono text-sm">{formatCurrency(freeShippingThreshold - subtotal)}</strong> more for FREE Shipping!</span>
+                    )}
+                  </span>
+                )}
+              </span>
+              <span className="self-end sm:self-auto font-mono text-xs font-bold text-stone-700 bg-stone-100 border border-stone-200 px-2.5 py-1 rounded-full shrink-0">
+                {effectiveProgress >= 100 ? '100%' : `${Math.round(effectiveProgress)}%`}
+              </span>
+            </div>
+
             <div className="w-full h-2.5 bg-[#FDF2F3] rounded-full overflow-hidden border border-[#F8D2D5]/50 p-0.5">
               <div
                 className="h-full bg-gradient-to-r from-[#A80C14] via-[#D93843] to-[#F5C77E] transition-all duration-700 rounded-full shadow-xs"
-                style={{
-                  width: `${freeShippingProgress >= 100 || quantityFreeDelivery?.unlocked
-                    ? 100
-                    : Math.min(100, freeShippingProgress)
-                    }%`
-                }}
+                style={{ width: `${effectiveProgress}%` }}
               />
             </div>
-          )}
 
           {shippingFee > 0 && (
             <p className="text-[11px] text-stone-500 font-sans flex items-center gap-1">
@@ -228,8 +232,9 @@ export default function CartClient() {
               <span>Delivery zone: <strong className="text-stone-800">{selectedZoneName}</strong> — ৳{shippingFee} (final fee set at checkout)</span>
             </p>
           )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {/* Main Grid: Cart Items List + Order Summary Sidebar */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
@@ -532,10 +537,10 @@ export default function CartClient() {
 
             <div className="p-3.5 bg-[#FDF2F3] border border-[#F8D2D5] rounded-2xl text-xs text-stone-600 space-y-1.5">
               <p className="flex items-center gap-1.5 font-bold text-stone-800">
-                <ShieldCheck className="w-4 h-4 text-[#A80C14]" /> Safe & Secure Checkout Guarantee
+                <ShieldCheck className="w-4 h-4 text-[#A80C14]" /> Safe &amp; Secure Checkout Guarantee
               </p>
               <p className="text-[11px] text-stone-500 leading-relaxed">
-                Cash on Delivery (COD), bKash, and Mobile Banking accepted across Bangladesh.
+                গেস্ট চেকআউট সুবিধা: একাউন্ট বা রেজিস্ট্রেশন ছাড়াই যে কোনো ভিজিটর সরাসরি অর্ডার করতে পারবেন।
               </p>
             </div>
           </div>

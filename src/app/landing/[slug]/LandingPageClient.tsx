@@ -54,7 +54,7 @@ import { formatCurrency } from '@/lib/utils';
 import { useCart } from '@/context/CartContext';
 import { useAnalytics } from '@/context/AnalyticsContext';
 import { useToast } from '@/components/ui/Toast';
-import { getYouTubeEmbedUrl, isYouTubeUrl } from '@/lib/videoUtils';
+import { getYouTubeEmbedUrl, getYouTubeVideoId, isYouTubeUrl } from '@/lib/videoUtils';
 import {
   parseAddressLocation,
   calculateShippingFee,
@@ -92,7 +92,7 @@ function Field({
   return (
     <div className={`space-y-1.5 ${className}`}>
       <label htmlFor={`lp-${name}`} className="text-[11px] sm:text-xs font-bold text-stone-700">
-        {label} {required && <span className="text-[#A80C14]">*</span>}
+        {label} {required && <span className="text-[#9A700F]">*</span>}
       </label>
       <input
         id={`lp-${name}`}
@@ -106,7 +106,7 @@ function Field({
         inputMode={inputMode}
         pattern={pattern}
         maxLength={maxLength}
-        className="w-full min-h-[44px] px-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs sm:text-sm text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#A80C14] focus:border-transparent transition-shadow"
+        className="w-full min-h-[44px] px-4 bg-stone-50 border border-stone-200 rounded-2xl text-xs sm:text-sm text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#9A700F] focus:border-transparent transition-shadow"
       />
     </div>
   );
@@ -118,7 +118,7 @@ interface LandingPageClientProps {
 
 export default function LandingPageClient({ initialProduct }: LandingPageClientProps) {
   const router = useRouter();
-  const { placeOrder, deliveryZones, products, freeShippingThreshold } = useCart();
+  const { placeOrder, deliveryZones, products, freeShippingThreshold, announcement } = useCart();
   const { trackEvent } = useAnalytics();
   const { showToast } = useToast();
 
@@ -368,15 +368,21 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
     return isYouTube
       ? getYouTubeEmbedUrl(product.videoUrl, {
         autoplay: true,
-        mute: true,
-        loop: true,
+        mute: false,
+        loop: false,
         controls: true,
       })
       : null;
   }, [product.videoUrl, isYouTube]);
 
-  const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [isMuted, setIsMuted] = useState<boolean>(true);
+  // The video never starts on its own: the visitor taps the play button first.
+  const [videoStarted, setVideoStarted] = useState<boolean>(false);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const youTubeThumb = useMemo(() => {
+    const id = getYouTubeVideoId(product.videoUrl);
+    return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+  }, [product.videoUrl]);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const togglePlay = () => {
@@ -390,6 +396,14 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
       }
     } else {
       setIsPlaying(!isPlaying);
+    }
+  };
+
+  const startVideo = () => {
+    setVideoStarted(true);
+    if (videoRef.current) {
+      videoRef.current.play().catch(() => { });
+      setIsPlaying(true);
     }
   };
 
@@ -453,13 +467,21 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
     return checkIsFreeDelivery(
       [{ product, quantity }],
       subtotal,
-      Number(freeShippingThreshold)
+      Number(freeShippingThreshold),
+      announcement
     );
-  }, [product, quantity, subtotal, freeShippingThreshold]);
+  }, [product, quantity, subtotal, freeShippingThreshold, announcement]);
 
   const effectiveShippingFee = isFreeDeliveryUnlocked ? 0 : parsedAddress.rate;
   const deliveryFee = effectiveShippingFee;
-  const totalPayable = subtotal + deliveryFee;
+  // Combo tier discount (same rule as the cart: highest tier whose minQuantity <= quantity)
+  const comboDiscount = useMemo(() => {
+    const tiers = (product.tierDiscounts || [])
+      .filter((t) => t.minQuantity > 0 && t.discountAmount > 0)
+      .sort((a, b) => b.minQuantity - a.minQuantity);
+    return tiers.find((t) => quantity >= t.minQuantity)?.discountAmount ?? 0;
+  }, [product.tierDiscounts, quantity]);
+  const totalPayable = Math.max(0, subtotal - comboDiscount + deliveryFee);
 
   // Close policy modal on Escape key
   useEffect(() => {
@@ -555,7 +577,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           },
         ],
         subtotal,
-        discount: (regularPrice - offerPrice) * quantity,
+        discount: (regularPrice - offerPrice) * quantity + comboDiscount,
         shippingFee: deliveryFee,
         total: totalPayable,
         shippingAddress: {
@@ -636,44 +658,8 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
       return;
     }
 
-    // 2. Not logged in: check if account exists in database for this phone number
-    setIsSubmitting(true);
-    try {
-      const res = await fetch('/api/auth/check-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: digitsOnly }),
-      });
-      const data = await res.json();
-
-      if (data.isLoggedIn && data.user) {
-        setSessionUser(data.user);
-        await executeOrderSubmission(data.user);
-        return;
-      }
-
-      setAuthPassword('');
-      setAuthConfirmPassword('');
-      setAuthModalError('');
-      setAuthEmail('');
-
-      if (data.accountExists && data.hasPassword) {
-        // Account exists with password -> prompt login
-        setAuthExistingUser(data.user || { phone: digitsOnly });
-        setAuthMode('signin');
-        setShowAuthModal(true);
-      } else {
-        // Account does not exist or has no password -> prompt user to create account
-        setAuthExistingUser(null);
-        setAuthMode('signup');
-        setShowAuthModal(true);
-      }
-    } catch (err) {
-      console.error('Account check error:', err);
-      setFormError('Connection issue while verifying account. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
+    // 2. Direct guest checkout: any visitor can place an order without opening an account or logging in
+    await executeOrderSubmission(null);
   };
 
   // ─── Modal Form Submit Handlers ───────────────────────────────────────────
@@ -786,9 +772,9 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
   // ─── Celebration / Order Success Screen ───────────────────────────────────
   if (orderSuccess) {
     return (
-      <div className="min-h-screen bg-[#FDF9F7] py-12 px-4 sm:px-6 flex items-center justify-center font-sans">
-        <div className="max-w-xl w-full bg-white rounded-3xl p-6 sm:p-10 shadow-2xl border border-[#F8D2D5] text-center space-y-6 animate-in zoom-in-95 duration-300">
-          <div className="w-20 h-20 bg-[#FDF2F3] text-[#800020] rounded-full flex items-center justify-center mx-auto border-2 border-[#F8D2D5] shadow-inner">
+      <div className="min-h-screen bg-[#FFFBF2] py-12 px-4 sm:px-6 flex items-center justify-center font-sans">
+        <div className="max-w-xl w-full bg-white rounded-3xl p-6 sm:p-10 shadow-2xl border border-[#EBD9A6] text-center space-y-6 animate-in zoom-in-95 duration-300">
+          <div className="w-20 h-20 bg-[#FBF3E1] text-[#8A6410] rounded-full flex items-center justify-center mx-auto border-2 border-[#EBD9A6] shadow-inner">
             <CheckCircle2 className="w-12 h-12 stroke-[2.5]" />
           </div>
 
@@ -796,7 +782,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             <span className="px-3.5 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-200">
               Order Confirmed (Cash on Delivery)
             </span>
-            <h1 className="font-serif text-2xl sm:text-3xl font-extrabold text-[#1C1917]">
+            <h1 className="lp-display text-2xl sm:text-3xl font-extrabold text-[#1C1917]">
               Thank You, {fullName}! 🎉
             </h1>
             <p className="text-stone-600 text-xs sm:text-sm max-w-md mx-auto leading-relaxed">
@@ -804,10 +790,10 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             </p>
           </div>
 
-          <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 text-left space-y-3 text-xs">
+          <div className="bg-[#FBF5E6] rounded-2xl p-5 border border-stone-200/80 text-left space-y-3 text-xs">
             <div className="flex justify-between items-center pb-2 border-b border-stone-200">
               <span className="text-stone-500 font-medium">Order ID:</span>
-              <span className="font-mono font-extrabold text-stone-900 text-sm">{orderSuccess.id}</span>
+              <span className="lp-display tabular-nums font-extrabold text-stone-900 text-sm">{orderSuccess.id}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-stone-500 font-medium">Item & Color:</span>
@@ -829,14 +815,14 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             </div>
             <div className="flex justify-between items-center pt-2 border-t border-stone-200 text-sm">
               <span className="font-bold text-stone-900">Total Payable:</span>
-              <span className="font-mono font-extrabold text-[#800020] text-base">{formatCurrency(totalPayable)}</span>
+              <span className="lp-display tabular-nums font-extrabold text-[#8A6410] text-base">{formatCurrency(totalPayable)}</span>
             </div>
           </div>
 
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link
               href="/"
-              className="w-full sm:w-auto px-6 py-3 bg-[#800020] hover:bg-[#660019] text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer text-center"
+              className="w-full sm:w-auto px-6 py-3 bg-[#8A6410] hover:bg-[#6E4F0C] text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer text-center"
             >
               Back to Home
             </Link>
@@ -857,125 +843,256 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[#FDF9F7] text-[#1C1917] font-sans selection:bg-[#F8D2D5] selection:text-[#800020]">
-      {/* ─── Topmost Sticky Promo Bar ────────────────────────────────────── */}
-      <div className="bg-[#800020] text-white py-2.5 px-4 sm:px-6 lg:px-8 text-[11px] sm:text-xs font-bold tracking-wider uppercase sticky top-0 z-40 shadow-sm">
-        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 mx-auto sm:mx-0">
-            <Flame className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse" />
-            <span>LIMITED TIME OFFER: GET FREE NATIONWIDE DELIVERY & SPECIAL DISCOUNT TODAY!</span>
-          </div>
-          <div className="hidden sm:flex items-center gap-3 shrink-0">
-            <a href="tel:01799775487" className="text-amber-200 hover:text-white flex items-center gap-1 font-mono text-xs">
-              <PhoneCall className="w-3.5 h-3.5" /> 01799-775487
-            </a>
-            <button
-              onClick={scrollToCheckout}
-              className="px-3 py-1 bg-white hover:bg-stone-100 text-[#800020] rounded-full text-xs font-extrabold shadow-xs transition-colors cursor-pointer"
-            >
-              Order Now
-            </button>
-          </div>
-        </div>
-      </div>
+  // ─── Dynamic landing content derived from the product record & store settings ──
+  const bn = (n: number) => n.toLocaleString('bn-BD');
+  const freeThreshold = Number(freeShippingThreshold) > 0 ? Number(freeShippingThreshold) : 0;
+  const productFeatures = (product.features || []).map((f) => f.trim()).filter(Boolean);
+  const bannerChips = [
+    ...productFeatures.slice(0, 2),
+    ...(colorsList.length > 1 ? [`${colorsList.length} Colors`] : []),
+  ];
+  const hasVideo = Boolean(product.videoUrl && product.videoUrl.trim());
+  const saveAmount = regularPrice > offerPrice ? regularPrice - offerPrice : 0;
+  const nameWords = product.name.trim().split(/\s+/);
+  const nameHead = nameWords.length >= 4 ? nameWords.slice(0, -2).join(' ') : '';
+  const nameTail = nameWords.length >= 4 ? nameWords.slice(-2).join(' ') : product.name;
+  // Free-delivery rules the landing order flow honors (store threshold, product quantity, store-wide combo)
+  const freeDeliveryLines: string[] = [];
+  const annActive = Boolean(announcement && announcement.isActive !== false && announcement.freeDeliveryOffer !== false);
+  const annCategory = (announcement?.freeDeliveryCategory || 'hijab').toLowerCase();
+  const annMinQty =
+    typeof announcement?.freeDeliveryMinQty === 'number' && announcement.freeDeliveryMinQty > 0
+      ? announcement.freeDeliveryMinQty
+      : 8;
+  const annAppliesHere =
+    annActive &&
+    (annCategory === 'all' ||
+      (product.category || '').toLowerCase() === annCategory ||
+      (product.subCategory || '').toLowerCase().includes(annCategory) ||
+      product.name.toLowerCase().includes(annCategory));
+  if (annAppliesHere) {
+    const catBn = annCategory === 'hijab' ? 'হিজাব' : annCategory === 'all' ? 'পণ্য' : annCategory;
+    freeDeliveryLines.push(`যেকোনো ${bn(annMinQty)}টি ${catBn} কিনলে ডেলিভারি ফ্রি`);
+  }
+  const prodFreeQty = Number(product.freeDeliveryQuantity) || 0;
+  if (prodFreeQty > 0 && !(annAppliesHere && prodFreeQty === annMinQty)) {
+    freeDeliveryLines.push(`এই পণ্য ${bn(prodFreeQty)}টি কিনলে ডেলিভারি ফ্রি`);
+  }
+  if (freeThreshold > 0) {
+    freeDeliveryLines.push(`৳${bn(freeThreshold)} বা তার বেশি অর্ডারে ডেলিভারি ফ্রি`);
+  }
+  const comboTiers = (product.tierDiscounts || [])
+    .filter((t) => t.minQuantity > 0 && t.discountAmount > 0)
+    .sort((a, b) => a.minQuantity - b.minQuantity);
+  const offerLines: string[] = [
+    ...(saveAmount > 0 ? [`প্রতি পিসে ৳${bn(saveAmount)} সাশ্রয়`] : []),
+    ...comboTiers.map((t) => `${bn(t.minQuantity)}টি কিনলে ৳${bn(t.discountAmount)} ছাড়`),
+    ...freeDeliveryLines,
+    // The store announcement text repeats the quantity rule when that rule already has its own line
+    ...(!annAppliesHere && announcement && announcement.isActive !== false && announcement.message?.trim() ? [announcement.message.trim()] : []),
+  ];
+  const promoText =
+    discountPercent > 0
+      ? `${bn(discountPercent)}% ছাড়${freeDeliveryLines[0] ? ` · ${freeDeliveryLines[0]}` : ''}`
+      : freeDeliveryLines[0] ?? 'আজই অর্ডার করুন';
+  const featureCards: { title: string; desc?: string }[] = [
+    {
+      title: productFeatures[0] ?? (product.material ? `${product.material} ফেব্রিক` : 'প্রিমিয়াম ফেব্রিক'),
+      desc: productFeatures[0] ? undefined : 'নরম, আরামদায়ক, সারাদিন পরার মতো',
+    },
+    {
+      title: productFeatures[1] ?? (product.workType ? `${product.workType} ডিটেইল` : 'সুন্দর ডিটেইল'),
+      desc: productFeatures[1] ? undefined : 'সহজে নষ্ট হয় না, দেখতে আলাদা',
+    },
+    {
+      title: productFeatures[2] ?? (colorsList.length > 1 ? `${bn(colorsList.length)}টি রঙ` : 'সুন্দর রঙ'),
+      desc: productFeatures[2] ? undefined : 'যেকোনো পোশাকের সাথে মানিয়ে যায়',
+    },
+    {
+      title: productFeatures[3] ?? 'সহজে সেট হয়',
+      desc: productFeatures[3] ? undefined : 'পিন ছাড়াই ঠিক থাকে',
+    },
+  ];
+  const faqItems = [
+    { q: 'পেমেন্ট কীভাবে করব?', a: 'ক্যাশ অন ডেলিভারি। পণ্য হাতে পেয়ে, দেখে নিয়ে ডেলিভারি ম্যানকে টাকা দিন। আগে কোনো টাকা লাগবে না।' },
+    { q: 'ডেলিভারি কতদিনে পাব?', a: 'কনফার্মেশন কলের পর ২-৩ দিনের মধ্যে পার্সেল পাবেন।' },
+    {
+      q: 'ডেলিভারি চার্জ কত?',
+      a: `ঢাকার ভেতরে ৳৮০, সাব-এরিয়ায় ৳১০০, ঢাকার বাইরে ৳১৫০।${freeDeliveryLines.length ? ` ${freeDeliveryLines.join('। ')}।` : ''}`,
+    },
+    {
+      q: 'কোন কোন রঙে পাওয়া যায়?',
+      a: colorsList.length > 0
+        ? `${bn(colorsList.length)}টি রঙে পাওয়া যায়: ${colorsList.map((c) => c.name).join(', ')}। স্ক্রিনের কারণে রঙে সামান্য পার্থক্য হতে পারে।`
+        : 'রঙ বেছে নিতে উপরের কালার সেকশন দেখুন। স্ক্রিনের কারণে রঙে সামান্য পার্থক্য হতে পারে।',
+    },
+    ...(product.material
+      ? [{ q: 'কী কাপড়ে তৈরি?', a: `${product.name} তৈরি ${product.material} দিয়ে${product.workType ? `, কাজের ধরন: ${product.workType}` : ''}।` }]
+      : []),
+    { q: 'পছন্দ না হলে কী করব?', a: 'ডেলিভারি ম্যানের সামনে পার্সেল চেক করে নিন। ফেরত দিতে চাইলে পুরো পার্সেল ফেরত দিতে হবে এবং ডেলিভারি চার্জ দিতে হবে। আংশিক ডেলিভারি দেওয়া হয় না, আর পার্সেল রিসিভ করার পর রিটার্ন নেওয়া হয় না।' },
+  ];
 
-      {/* ─── Trust Feature Strip ─────────────────────────────────────────── */}
-      <div className="bg-[#FCFAF8] border-b border-stone-200/60 py-2.5 px-4 sm:px-6 lg:px-8 text-[11px] text-stone-600 font-medium">
-        <div className="max-w-5xl mx-auto flex items-center justify-between flex-wrap gap-2 text-center">
-          <span className="flex items-center gap-1.5">
-            <Truck className="w-3.5 h-3.5 text-[#800020]" /> Nationwide Delivery
-          </span>
-          <span className="flex items-center gap-1.5">
-            <PhoneCall className="w-3.5 h-3.5 text-[#800020]" /> 24/7 Helpline Support
-          </span>
-          <span className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#800020]" /> Cash On Delivery
-          </span>
-          <span className="flex items-center gap-1.5 hidden sm:flex">
-            <RotateCcw className="w-3.5 h-3.5 text-[#800020]" /> Doorstep Inspection Policy
-          </span>
-        </div>
+  return (
+    <div className="min-h-screen bg-[#F1E8D2] text-[#33260F] [font-family:var(--font-bengali),var(--font-sans),system-ui,sans-serif] selection:bg-[#EBD9A6] selection:text-[#8A6410]">
+      <div id="lp-column" className="max-w-[480px] mx-auto bg-[#FFFCF5] shadow-[0_20px_60px_rgba(60,40,10,0.18)]">
+      {/* ─── Promo bar ───────────────────────────────────────────────────── */}
+      <div className="bg-[#33260F] text-[#F3E2B0] text-[13px] font-semibold text-center px-4 py-2">
+        সারা বাংলাদেশে ক্যাশ অন ডেলিভারি · <b className="text-[#EBC862]">{promoText}</b>
       </div>
 
       {/* ─── SECTION 1: HERO SECTION (Offer + Video + Instant CTA) ──────── */}
-      <section id="hero-section" className="py-8 sm:py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto text-center">
-          {/* Category Tag */}
-          <div className="inline-flex items-center gap-1.5 px-4 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#800020] font-extrabold text-[11px] uppercase tracking-wider mb-3">
-            <Crown className="w-3.5 h-3.5 text-[#800020]" />
-            <span>{product.category ? `${product.category} COLLECTION` : 'PREMIUM MODEST COLLECTION'}</span>
+      <section id="hero-section" className="lp-framed relative px-5 pt-9 pb-9 bg-gradient-to-b from-[#F8ECCC] to-[#FFFCF5]">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <Image
+              src="/Logo.jpg"
+              alt="Falak Closet"
+              width={64}
+              height={64}
+              className="rounded-full border-2 border-[#C99A2E] shadow-md"
+            />
+            <div className="leading-tight">
+              <p className="lp-display text-lg font-extrabold text-[#8A6410]">Falak Closet</p>
+              <p className="text-[10px] font-semibold tracking-[0.2em] text-[#6E5C3A]">MODEST FASHION</p>
+            </div>
           </div>
+          <span className="text-xs font-semibold text-[#2F6B3F] bg-white border border-[#E7D5A8] rounded-full px-2.5 py-0.5">
+            ক্যাশ অন ডেলিভারি
+          </span>
+        </div>
 
-          {/* H1 Headline */}
-          <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl font-extrabold text-[#7A0C14] leading-tight tracking-tight max-w-4xl mx-auto uppercase">
-            {product.name}
-          </h1>
+        <p className="text-xs font-bold tracking-[0.12em] uppercase text-[#8A6410]">
+          {product.category ? `${product.category} · Limited offer` : 'Modest fashion · Limited offer'}
+        </p>
+        <h1 className="mt-2 text-[32px] leading-[1.22] font-bold text-[#33260F] text-balance">
+          {nameHead ? `${nameHead} ` : ''}
+          <em className="not-italic text-[#8A6410]">{nameTail}</em>
+        </h1>
+        <p className="mt-2 text-base text-[#6E5C3A] leading-relaxed">
+          {product.description ||
+            `Experience sheer elegance with soft, breathable ${product.material ? `${product.material.toLowerCase()} fabric` : 'fabric'}${product.workType ? ` and exquisite ${product.workType.toLowerCase()}` : ''} — perfect for every modest occasion.`}
+        </p>
 
-          {/* Sub-headline */}
-          <p className="text-stone-600 text-xs sm:text-sm max-w-2xl mx-auto mt-3 leading-relaxed">
-            {product.description ||
-              `Experience sheer elegance with soft, breathable ${product.material ? `${product.material.toLowerCase()} fabric` : 'fabric'}${product.workType ? ` and exquisite ${product.workType.toLowerCase()}` : ''} — perfect for every modest occasion.`}
-          </p>
+        {/* Product banner: image, discount burst, feature chips */}
+        <div className="mt-5 relative rounded-[20px] overflow-hidden bg-[#F0DCA8] border border-[#E7D5A8] w-full aspect-[4/4.4]">
+          <Image
+            src={activeImage}
+            alt={product.name}
+            fill
+            sizes="(max-width: 480px) 100vw, 480px"
+            className="object-cover object-top"
+            priority
+          />
+          {discountPercent > 0 && (
+            <div className="absolute top-3.5 left-3.5 w-[84px] h-[84px] rounded-full bg-gradient-to-b from-[#EBC862] via-[#C99A2E] to-[#A67C1A] text-[#2A1D07] border-2 border-[#F6E3A1] shadow-lg flex flex-col items-center justify-center -rotate-[10deg]">
+              <span className="lp-display font-extrabold text-[26px] leading-none">{bn(discountPercent)}%</span>
+              <span className="text-[11px] font-semibold">ছাড়</span>
+            </div>
+          )}
+          {bannerChips.length > 0 && (
+            <div className="absolute top-3 right-3 flex flex-col items-end gap-1.5 max-w-[55%]">
+              {bannerChips.map((chip) => (
+                <span key={chip} className="bg-[#FFFCF5] border border-[#E7D5A8] text-[#33260F] text-xs font-semibold px-2.5 py-1.5 rounded-xl shadow-md truncate max-w-full">
+                  ✦ {chip}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
 
-          {/* Feature Highlights (3 items with icons) */}
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-6 mt-4 text-xs font-semibold text-stone-700">
-            <span className="flex items-center gap-1.5 text-[#800020]">
-              <Feather className="w-3.5 h-3.5 text-[#800020]" /> {product.material ? `Premium ${product.material} Fabric` : 'Premium Quality Fabric'}
-            </span>
-            <span className="flex items-center gap-1.5 text-[#800020]">
-              <Award className="w-3.5 h-3.5 text-[#800020]" /> {product.workType ? `Durable, High-Quality ${product.workType}` : 'Durable, High-Quality Craftsmanship'}
-            </span>
-            <span className="flex items-center gap-1.5 text-[#800020]">
-              <CheckCircle className="w-3.5 h-3.5 text-[#800020]" /> Comfortable, Non-Slip, & Easy to Style
-            </span>
-          </div>
-
-          {/* Price Display */}
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mt-4">
-            {discountPercent > 0 && regularPrice > offerPrice && (
-              <span className="text-stone-400 line-through text-lg sm:text-xl font-mono">
-                REGULAR: ৳{regularPrice}
+        <div className="flex flex-wrap items-baseline gap-3 mt-5">
+          <span className="lp-display font-extrabold text-[40px] leading-none text-[#8A6410]">৳{bn(offerPrice)}</span>
+          {saveAmount > 0 && (
+            <>
+              <span className="text-lg text-[#6E5C3A] line-through">৳{bn(regularPrice)}</span>
+              <span className="text-[13px] font-bold bg-[#EBC862] text-[#2A1D07] rounded-md px-2 py-0.5">
+                {bn(saveAmount)} টাকা সাশ্রয়
               </span>
-            )}
-            <span className="font-mono font-black text-3xl sm:text-4xl text-[#800020]">
-              OFFER PRICE: ৳{offerPrice}
-            </span>
-            {discountPercent > 0 && (
-              <span className="px-2.5 py-0.5 bg-[#800020] text-white font-extrabold text-xs rounded-lg uppercase shadow-xs">
-                {discountBadge}
-              </span>
-            )}
-          </div>
+            </>
+          )}
+        </div>
 
-          {/* Media Showcase: Video if configured, otherwise Product Image */}
-          <div className="mt-6 relative rounded-3xl overflow-hidden bg-stone-900 border border-stone-200/80 shadow-2xl w-full mx-auto aspect-video sm:aspect-[16/9]">
-            {product.videoUrl && product.videoUrl.trim() ? (
-              isYouTube && youTubeEmbedUrl ? (
+        <button
+          onClick={scrollToCheckout}
+          className="lp-cta mt-[18px] w-full flex items-center justify-center gap-2.5 rounded-[14px] px-5 py-4 text-lg font-bold cursor-pointer"
+        >
+          <span className="text-center">
+            এখনই অর্ডার করুন
+            <small className="block text-xs font-medium opacity-90">পণ্য হাতে পেয়ে টাকা দিন</small>
+          </span>
+          <ArrowRight className="w-5 h-5" aria-hidden="true" />
+        </button>
+
+        <div className="grid grid-cols-3 gap-2 mt-4 text-center text-xs text-[#6E5C3A]">
+          {[
+            ['ক্যাশ অন', 'ডেলিভারি'],
+            ['২–৩ দিনে', 'হাতে পাবেন'],
+            ['দেখে নিন', 'তারপর পেমেন্ট'],
+          ].map(([a, b]) => (
+            <div key={a} className="bg-white border border-[#E7D5A8] rounded-[10px] px-1 py-2 leading-tight">
+              <b className="block text-[13px] text-[#33260F]">{a}</b>
+              {b}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── VIDEO SECTION (only when the product has a video) ─────────── */}
+      {hasVideo && (
+        <section id="video-section" className="px-5 py-9 bg-[#33260F]">
+          <p className="text-xs font-bold tracking-[0.12em] uppercase text-[#EBC862]">ভিডিওতে দেখুন</p>
+          <h2 className="mt-1.5 text-[26px] leading-tight font-bold text-[#F3E2B0] text-balance">
+            হিজাবটা পরলে কেমন লাগে, নিজের চোখে দেখুন
+          </h2>
+          <p className="mt-2 text-[15px] text-[#F3E2B0]/80">কাপড়, কাজ আর রঙ ভিডিওতে ভালো করে দেখে নিন।</p>
+          <div className="relative mt-[18px] rounded-2xl overflow-hidden bg-stone-900 border border-white/15 w-full aspect-video">
+              {!videoStarted && (
+                <button
+                  type="button"
+                  onClick={startVideo}
+                  aria-label="ভিডিও চালু করুন"
+                  className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 cursor-pointer group bg-gradient-to-b from-black/25 to-black/60"
+                >
+                  {youTubeThumb && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={youTubeThumb} alt="" className="absolute inset-0 w-full h-full object-cover -z-10" />
+                  )}
+                  <span className="relative flex items-center justify-center">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-[#C99A2E]/60 motion-safe:animate-ping" aria-hidden="true" />
+                    <span className="relative w-[72px] h-[72px] rounded-full bg-gradient-to-b from-[#EBC862] via-[#C99A2E] to-[#A67C1A] border-2 border-[#F6E3A1] shadow-2xl flex items-center justify-center transition-transform group-hover:scale-110">
+                      <Play className="w-8 h-8 ml-1 fill-[#2A1D07] text-[#2A1D07]" />
+                    </span>
+                  </span>
+                  <span className="text-[13px] font-bold text-[#F3E2B0] bg-[#33260F]/80 border border-[#C99A2E]/50 rounded-full px-3.5 py-1">
+                    ভিডিও দেখুন
+                  </span>
+                </button>
+              )}
+              {isYouTube && youTubeEmbedUrl ? (
                 <div className="relative w-full h-full bg-black">
-                  <iframe
+                  {videoStarted && <iframe
                     src={youTubeEmbedUrl}
                     title={product.name}
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                     allowFullScreen
                     className="w-full h-full border-0"
-                  />
+                  />}
                 </div>
               ) : (
                 <>
                   <video
                     ref={videoRef}
-                    src={product.videoUrl}
+                    src={product.videoUrl ?? undefined}
                     poster={activeImage}
                     playsInline
                     loop
                     muted={isMuted}
-                    autoPlay
+                    preload="metadata"
                     className="w-full h-full object-cover"
                   />
 
                   {/* Top Video Overlay Badge */}
-                  <div className="absolute top-3 sm:top-4 left-3 sm:left-4 right-3 sm:right-4 flex items-center justify-between pointer-events-none">
+                  <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
                     <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-white text-[11px] font-bold border border-white/20">
                       <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
                       <span>PRODUCT PREVIEW VIDEO</span>
@@ -995,25 +1112,25 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-[2px] transition-all cursor-pointer group"
                       aria-label="Play product video"
                     >
-                      <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#800020]/90 text-white flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform">
-                        <Play className="w-8 h-8 sm:w-10 sm:h-10 ml-1 fill-white" />
+                      <div className="w-16 h-16 rounded-full bg-[#8A6410]/90 text-white flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform">
+                        <Play className="w-8 h-8 ml-1 fill-white" />
                       </div>
                     </button>
                   )}
 
                   {/* Bottom Video Controls Bar */}
-                  <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4 flex items-center justify-between bg-black/60 backdrop-blur-md rounded-2xl px-3 sm:px-4 py-2 border border-white/10 text-white">
+                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between bg-black/60 backdrop-blur-md rounded-2xl px-3 py-2 border border-white/10 text-white">
                     <button
                       onClick={togglePlay}
                       className="p-1.5 hover:bg-white/20 rounded-lg transition-colors cursor-pointer flex items-center gap-2 text-xs font-bold"
                     >
                       {isPlaying ? <Pause className="w-4 h-4 fill-white" /> : <Play className="w-4 h-4 fill-white" />}
-                      <span className="hidden sm:inline">{isPlaying ? 'Pause' : 'Play'}</span>
+                      <span className="hidden ">{isPlaying ? 'Pause' : 'Play'}</span>
                     </button>
 
                     <button
                       onClick={scrollToCheckout}
-                      className="px-4 py-1.5 bg-[#800020] hover:bg-[#660019] text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                      className="px-4 py-1.5 bg-[#8A6410] hover:bg-[#6E4F0C] text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-1.5"
                     >
                       <span>Instant Order</span>
                       <ChevronDown className="w-3.5 h-3.5" />
@@ -1028,219 +1145,83 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     </button>
                   </div>
                 </>
-              )
-            ) : (
-              <div className="relative w-full h-full group">
-                <Image
-                  src={activeImage}
-                  alt={product.name}
-                  fill
-                  className="object-cover transition-transform duration-700 group-hover:scale-105"
-                  priority
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30 pointer-events-none" />
+              )}
+          </div>
+          <button
+            onClick={scrollToCheckout}
+            className="lp-cta mt-4 w-full flex items-center justify-center gap-2 rounded-[14px] px-5 py-3.5 text-lg font-bold cursor-pointer"
+          >
+            অর্ডার করুন <ArrowRight className="w-5 h-5" aria-hidden="true" />
+          </button>
+        </section>
+      )}
 
-                {/* Top Badge */}
-                <div className="absolute top-3 sm:top-4 left-3 sm:left-4 right-3 sm:right-4 flex items-center justify-between pointer-events-none">
-                  <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-white text-[11px] font-bold border border-white/20">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    <span>FEATURED PRODUCT SHOWCASE</span>
-                  </div>
-                  {totalReviewsCount > 0 && (
-                    <div className="bg-black/60 backdrop-blur-md px-3 py-1 rounded-full text-amber-300 text-[11px] font-bold flex items-center gap-1 border border-white/20">
-                      <Star className="w-3.5 h-3.5 fill-amber-300" />
-                      <span>{avgRating} / 5.0</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Bottom Overlay Controls */}
-                <div className="absolute bottom-3 sm:bottom-4 left-3 sm:left-4 right-3 sm:right-4 flex items-center justify-between bg-black/60 backdrop-blur-md rounded-2xl px-4 py-2 border border-white/10 text-white">
-                  <div className="text-xs font-bold text-stone-200 truncate">
-                    <span>Selected Shade: </span>
-                    <span className="text-amber-200 font-extrabold">{selectedColor}</span>
-                  </div>
-                  <button
-                    onClick={scrollToCheckout}
-                    className="px-4 py-1.5 bg-[#800020] hover:bg-[#660019] text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-1.5"
-                  >
-                    <span>Instant Order</span>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
+      {/* ─── OFFER + FEATURES ────────────────────────────────────────────── */}
+      <section className="px-5 py-9">
+        {(discountPercent > 0 || offerLines.length > 0) && (
+          <div className="rounded-[18px] bg-[#33260F] border border-[#C99A2E] text-[#F3E2B0] px-[18px] py-[22px]">
+            <p className="text-[15px] text-center">আজকের স্পেশাল অফার</p>
+            {discountPercent > 0 && (
+              <p className="lp-display text-[44px] font-extrabold leading-none text-[#EBC862] mt-1.5 text-center">
+                {bn(discountPercent)}% ছাড়
+              </p>
+            )}
+            {offerLines.length > 0 && (
+              <ul className="mt-3.5 space-y-2 text-[15px]">
+                {offerLines.map((line) => (
+                  <li key={line} className="flex items-start gap-2.5 bg-white/10 rounded-[10px] px-3 py-2">
+                    <span className="mt-0.5 text-[#EBC862]" aria-hidden="true">✦</span>
+                    <span className="min-w-0 break-words">{line}</span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
+        )}
 
-          {/* Primary CTA Button */}
-          <div className="mt-8">
-            <button
-              onClick={scrollToCheckout}
-              className="w-full sm:w-auto px-10 py-4 bg-[#800020] hover:bg-[#660019] text-white font-extrabold text-base sm:text-lg rounded-full shadow-xl hover:shadow-2xl transition-all cursor-pointer inline-flex items-center justify-center gap-2 group tracking-wide uppercase"
-            >
-              <span>ORDER NOW — CASH ON DELIVERY</span>
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </button>
-            <p className="text-stone-500 text-xs mt-2 flex items-center justify-center gap-1 font-medium">
-              <Lock className="w-3 h-3 text-emerald-600" />
-              <span>100% Cash on Delivery · Inspect product upon arrival before payment</span>
-            </p>
-          </div>
+        <p className="mt-7 text-xs font-bold tracking-[0.12em] uppercase text-[#8A6410]">কেন এই হিজাব</p>
+        <h2 className="mt-1.5 text-[26px] leading-tight font-bold text-[#33260F]">যা পাবেন এই হিজাবে</h2>
+        <div className="grid grid-cols-2 gap-2.5 mt-5">
+          {featureCards.map((c, i) => (
+            <div key={`${c.title}-${i}`} className="bg-[#FBF3E1] border border-[#E7D5A8] rounded-[14px] px-3 py-3.5 min-w-0">
+              <svg viewBox="0 0 24 24" className="w-[26px] h-[26px] stroke-[#8A6410] fill-none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {[
+                  <path key="a" d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z" />,
+                  <path key="b" d="M3 12c3-6 6 6 9 0s6 6 9 0" />,
+                  <g key="c"><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></g>,
+                  <path key="d" d="M5 12l4 4L19 6" />,
+                ][i % 4]}
+              </svg>
+              <b className="block mt-1.5 text-[15px] break-words">{c.title}</b>
+              {c.desc && <span className="block text-[13px] leading-snug text-[#6E5C3A]">{c.desc}</span>}
+            </div>
+          ))}
         </div>
-      </section>
-
-      {/* ─── SECTION 2: PRODUCT USP (Why This Hijab?) ───────────────────── */}
-      <section className="py-12 sm:py-16 bg-white border-y border-stone-200/80 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto space-y-8">
-          <div className="text-center space-y-1.5">
-            <p className="text-[11px] font-bold text-[#800020] uppercase tracking-widest">
-              UNIQUE SELLING POINTS
-            </p>
-            <h2 className="font-serif text-2xl sm:text-3xl font-extrabold text-[#7A0C14] uppercase">
-              {product.category && !product.category.toLowerCase().includes('hijab')
-                ? `WHY THIS ${product.category.toUpperCase()} IS PERFECT FOR YOU?`
-                : 'WHY THIS HIJAB IS PERFECT FOR YOU?'}
-            </h2>
-            <p className="text-xs sm:text-sm text-stone-500 max-w-md mx-auto">
-              Premium craft, imported fabric, and attention to every modest detail.
-            </p>
-          </div>
-
-          {/* 6-Card Responsive Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {/* 1 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
-              <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center border border-amber-200 mb-3 shadow-xs">
-                <Feather className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-stone-900">Premium Quality Fabric</h3>
-                <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  Soft, breathable {product.material ? `${product.material.toLowerCase()} fabric` : 'fabric'} for all-day wear without feeling heavy.
-                </p>
-              </div>
-            </div>
-
-            {/* 2 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
-              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-200 mb-3 shadow-xs">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-stone-900">Non-Slip Grip</h3>
-                <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  Stays firmly in place on your head without excessive pinning or constant adjusting.
-                </p>
-              </div>
-            </div>
-
-            {/* 3 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
-              <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center border border-rose-200 mb-3 shadow-xs">
-                <Award className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-stone-900">
-                  {product.workType ? `${product.workType} Detail` : 'Exquisite Detailing'}
-                </h3>
-                <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  High-grade {product.workType ? `${product.workType.toLowerCase()} craftsmanship` : 'craftsmanship'} that won't easily wear off.
-                </p>
-              </div>
-            </div>
-
-            {/* 4 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
-              <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center border border-purple-200 mb-3 shadow-xs">
-                <Layers className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-stone-900">12+ Elegant Shades</h3>
-                <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  Rich, shining colors curated to match any modest outfit and celebration.
-                </p>
-              </div>
-            </div>
-
-            {/* 5 */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all">
-              <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200 mb-3 shadow-xs">
-                <Truck className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-stone-900">Cash On Delivery</h3>
-                <p className="text-xs text-stone-500 mt-1 leading-relaxed">
-                  Inspect your parcel in front of the delivery agent before paying.
-                </p>
-              </div>
-            </div>
-
-            {/* 6: Doorstep Inspection & Parcel Return Rules */}
-            <div className="bg-[#FAF6F4] rounded-2xl p-4 sm:p-5 border border-stone-200/80 shadow-xs flex flex-col justify-start hover:border-[#F8D2D5] transition-all col-span-2 md:col-span-1">
-              <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200 mb-3 shadow-xs shrink-0">
-                <RotateCcw className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-sm text-stone-900 leading-snug">
-                  Doorstep Inspection &amp; Parcel Return Rules
-                </h3>
-                <ul className="mt-3 space-y-2 text-[11px] leading-relaxed text-stone-600">
-                  <li className="space-y-0.5">
-                    <strong className="text-stone-900 font-bold block">
-                      Inspect in Front of Delivery Rider:
-                    </strong>
-                    <span>
-                      Customers are required to check the contents of their parcel in front of the courier delivery rider at the time of delivery.
-                    </span>
-                  </li>
-                  <li className="space-y-0.5">
-                    <strong className="text-stone-900 font-bold block">
-                      Full Parcel Return:
-                    </strong>
-                    <span>
-                      If you choose to return the parcel upon inspection, the entire parcel must be handed back to the rider along with payment for the delivery fee.
-                    </span>
-                  </li>
-                  <li className="space-y-0.5">
-                    <strong className="text-stone-900 font-bold block">
-                      No Partial Deliveries:
-                    </strong>
-                    <span>
-                      We do not offer partial delivery (e.g. keeping only 1 item and returning the remainder from a multi-item package).
-                    </span>
-                  </li>
-                  <li className="space-y-0.5">
-                    <strong className="text-stone-900 font-bold block">
-                      Post-Acceptance Policy:
-                    </strong>
-                    <span>
-                      Once the parcel has been accepted and received from the delivery rider, returns are no longer accepted from our page.
-                    </span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
+        <button
+          onClick={scrollToCheckout}
+          className="lp-cta mt-[18px] w-full flex items-center justify-center gap-2 rounded-[14px] px-5 py-4 text-lg font-bold cursor-pointer"
+        >
+          অফারটি নিন <ArrowRight className="w-5 h-5" aria-hidden="true" />
+        </button>
       </section>
 
       {/* ─── SECTION 3: PRODUCT COLOR VARIATIONS (Interactive Selector) ── */}
-      <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8">
+      <section className="lp-framed relative py-12 px-5 bg-[#FBF3E1]">
         <div className="max-w-5xl mx-auto space-y-8">
           <div className="text-center space-y-1.5">
-            <p className="text-[11px] font-bold text-[#800020] uppercase tracking-widest">
+            <p className="text-[11px] font-bold text-[#8A6410] uppercase tracking-widest">
               COLOR SELECTION SECTION
             </p>
-            <h2 className="font-serif text-2xl sm:text-3xl font-extrabold text-[#7A0C14] uppercase">
+            <h2 className="lp-display text-2xl font-extrabold text-[#4A3508] uppercase">
               CHOOSE YOUR FAVORITE COLOR
             </h2>
-            <p className="text-xs sm:text-sm text-stone-500 max-w-md mx-auto">
+            <p className="text-xs text-stone-500 max-w-md mx-auto">
               Click a shade to preview the hijab styling
             </p>
           </div>
 
           {/* 2-Column Responsive Container */}
-          <div className="bg-white rounded-3xl border border-stone-200 p-5 sm:p-8 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 items-center">
+          <div className="bg-white rounded-3xl border border-stone-200 p-5 shadow-sm grid grid-cols-1 gap-6 items-center">
             {/* Left: Dynamic Main Image Preview with Carousel Controls */}
             <div className="aspect-[4/5] relative rounded-2xl overflow-hidden bg-stone-100 border border-stone-200/80 shrink-0 shadow-inner group">
               <Image
@@ -1259,7 +1240,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
 
               {/* Variant Index Counter */}
               {colorsList.length > 1 && (
-                <span className="absolute top-3 right-3 bg-black/70 backdrop-blur-md text-amber-200 text-[11px] font-mono font-bold px-2.5 py-1 rounded-full border border-white/20 z-10 shadow-xs">
+                <span className="absolute top-3 right-3 bg-black/70 backdrop-blur-md text-amber-200 text-[11px] lp-display tabular-nums font-bold px-2.5 py-1 rounded-full border border-white/20 z-10 shadow-xs">
                   {currentColorIndex + 1} / {colorsList.length}
                 </span>
               )}
@@ -1273,11 +1254,11 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       e.stopPropagation();
                       handlePrevVariant();
                     }}
-                    className="absolute left-2.5 sm:left-3.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/60 hover:bg-[#800020] text-white flex items-center justify-center backdrop-blur-md border border-white/30 shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer group/btn"
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-black/60 hover:bg-[#8A6410] text-white flex items-center justify-center backdrop-blur-md border border-white/30 shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer group/btn"
                     aria-label="Previous variant"
                     title="Previous variant"
                   >
-                    <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6 group-hover/btn:-translate-x-0.5 transition-transform stroke-[2.5]" />
+                    <ChevronLeft className="w-5 h-5 group-hover/btn:-translate-x-0.5 transition-transform stroke-[2.5]" />
                   </button>
 
                   <button
@@ -1286,11 +1267,11 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       e.stopPropagation();
                       handleNextVariant();
                     }}
-                    className="absolute right-2.5 sm:right-3.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-black/60 hover:bg-[#800020] text-white flex items-center justify-center backdrop-blur-md border border-white/30 shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer group/btn"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-black/60 hover:bg-[#8A6410] text-white flex items-center justify-center backdrop-blur-md border border-white/30 shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer group/btn"
                     aria-label="Next variant"
                     title="Next variant"
                   >
-                    <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6 group-hover/btn:translate-x-0.5 transition-transform stroke-[2.5]" />
+                    <ChevronRight className="w-5 h-5 group-hover/btn:translate-x-0.5 transition-transform stroke-[2.5]" />
                   </button>
                 </>
               )}
@@ -1304,11 +1285,11 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
                     COLOR SELECTION
                   </span>
-                  <h3 className="font-serif text-lg sm:text-xl font-bold text-stone-900 mt-0.5">
+                  <h3 className="lp-display text-lg font-bold text-stone-900 mt-0.5">
                     {product.name}
                   </h3>
                   <p className="text-xs text-stone-500 mt-1">
-                    Selected Shade: <strong className="text-[#800020]">{selectedColor}</strong>
+                    Selected Shade: <strong className="text-[#8A6410]">{selectedColor}</strong>
                   </p>
                 </div>
 
@@ -1326,7 +1307,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       >
                         <ChevronLeft className="w-3.5 h-3.5" />
                       </button>
-                      <span className="text-[11px] font-bold text-stone-700 font-mono px-1">
+                      <span className="text-[11px] font-bold text-stone-700 lp-display tabular-nums px-1">
                         {colorPage + 1}/{totalColorPages}
                       </span>
                       <button
@@ -1359,7 +1340,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     return (
                       <div
                         key={pageIdx}
-                        className="w-full shrink-0 grid grid-cols-2 gap-2 sm:gap-2.5 content-start min-h-[152px]"
+                        className="w-full shrink-0 grid grid-cols-2 gap-2 content-start min-h-[152px]"
                       >
                         {pageItems.map((col, itemIdx) => {
                           const globalIndex = pageIdx * 6 + itemIdx;
@@ -1370,24 +1351,24 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                               key={col.name}
                               type="button"
                               onClick={() => handleColorSelect(col.name, globalIndex)}
-                              className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 group ${isSelected
-                                ? 'border-[#800020] bg-[#FFF5F6] shadow-xs'
+                              className={`p-2.5 min-w-0 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 group ${isSelected
+                                ? 'border-[#8A6410] bg-[#FBF3E1] shadow-xs'
                                 : 'border-stone-200 bg-white hover:bg-stone-50 hover:border-stone-300'
                                 }`}
                             >
                               <span
-                                className={`w-4 h-4 rounded-md shrink-0 border border-black/20 shadow-inner transition-transform ${isSelected ? 'ring-1 ring-[#800020]/40 scale-105' : 'group-hover:scale-105'
+                                className={`w-4 h-4 rounded-md shrink-0 border border-black/20 shadow-inner transition-transform ${isSelected ? 'ring-1 ring-[#8A6410]/40 scale-105' : 'group-hover:scale-105'
                                   }`}
                                 style={{ backgroundColor: col.hex }}
                               />
                               <span
-                                className={`text-xs truncate transition-colors ${isSelected ? 'font-black text-[#800020]' : 'font-semibold text-stone-700'
+                                className={`text-xs truncate transition-colors ${isSelected ? 'font-black text-[#8A6410]' : 'font-semibold text-stone-700'
                                   }`}
                               >
                                 {col.name}
                               </span>
                               {isSelected && (
-                                <Check className="w-3.5 h-3.5 text-[#800020] ml-auto shrink-0 stroke-[2.5]" />
+                                <Check className="w-3.5 h-3.5 text-[#8A6410] ml-auto shrink-0 stroke-[2.5]" />
                               )}
                             </button>
                           );
@@ -1419,7 +1400,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       type="button"
                       onClick={() => setColorPage(dotIdx)}
                       className={`h-1.5 rounded-full transition-all cursor-pointer ${colorPage === dotIdx
-                        ? 'w-6 bg-[#800020]'
+                        ? 'w-6 bg-[#8A6410]'
                         : 'w-2 bg-stone-300 hover:bg-stone-400'
                         }`}
                       title={`Go to page ${dotIdx + 1}`}
@@ -1475,8 +1456,8 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                         }}
                         type="button"
                         onClick={() => handleColorSelect(col.name, index)}
-                        className={`w-12 h-14 sm:w-14 sm:h-16 rounded-xl relative shrink-0 p-0.5 border transition-all cursor-pointer ${isSelected
-                          ? 'border-[#800020] bg-white shadow-md'
+                        className={`w-12 h-14 rounded-xl relative shrink-0 p-0.5 border transition-all cursor-pointer ${isSelected
+                          ? 'border-[#8A6410] bg-white shadow-md'
                           : 'border-stone-200 bg-white opacity-70 hover:opacity-100 hover:border-stone-400'
                           }`}
                         title={`Variant #${index + 1}: ${col.name}`}
@@ -1484,7 +1465,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                         <div className="w-full h-full rounded-[9px] overflow-hidden relative">
                           <Image src={col.image} alt={col.name} fill className="object-cover" />
                           <span
-                            className={`absolute bottom-0 inset-x-0 text-[9px] font-bold py-0.5 text-center leading-none ${isSelected ? 'bg-[#800020] text-white' : 'bg-black/60 text-white'
+                            className={`absolute bottom-0 inset-x-0 text-[9px] font-bold py-0.5 text-center leading-none ${isSelected ? 'bg-[#8A6410] text-white' : 'bg-black/60 text-white'
                               }`}
                           >
                             #{index + 1}
@@ -1500,7 +1481,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               <button
                 type="button"
                 onClick={scrollToCheckout}
-                className="w-full py-3.5 bg-[#800020] hover:bg-[#660019] text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+                className="w-full py-3.5 lp-cta font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <span>Order This Color ({selectedColor})</span>
                 <ChevronDown className="w-4 h-4" />
@@ -1511,13 +1492,14 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
       </section>
 
       {/* ─── SECTION 4: CUSTOMER REVIEWS & SOCIAL PROOF ─────────────────── */}
-      <section className="py-12 sm:py-16 bg-white border-y border-stone-200/80 px-4 sm:px-6 lg:px-8">
+{totalReviewsCount > 0 && (
+      <section className="py-12 bg-white border-y border-stone-200/80 px-4 ">
         <div className="max-w-5xl mx-auto space-y-8">
           <div className="text-center space-y-1.5">
-            <p className="text-[11px] font-bold text-[#800020] uppercase tracking-widest">
+            <p className="text-[11px] font-bold text-[#8A6410] uppercase tracking-widest">
               REVIEWS SECTION
             </p>
-            <h2 className="font-serif text-2xl sm:text-3xl font-extrabold text-[#7A0C14] uppercase">
+            <h2 className="lp-display text-2xl font-extrabold text-[#4A3508] uppercase">
               CUSTOMER REVIEWS & RATINGS
             </h2>
             {totalReviewsCount > 0 ? (
@@ -1531,7 +1513,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       }`}
                   />
                 ))}
-                <span className="font-bold text-stone-900 text-xs ml-1 font-mono">
+                <span className="font-bold text-stone-900 text-xs ml-1 lp-display tabular-nums">
                   {avgRating}/5.0 ({totalReviewsCount} VERIFIED {totalReviewsCount === 1 ? 'CUSTOMER' : 'CUSTOMERS'})
                 </span>
               </div>
@@ -1549,7 +1531,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
 
           {/* Testimonial Cards (Dynamic from product.reviewsList) */}
           {approvedReviews.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               {approvedReviews.map((rev, index) => {
                 const reviewImage =
                   colorsList[index % colorsList.length]?.image ||
@@ -1559,7 +1541,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 return (
                   <div
                     key={rev.id || `rev-${index}`}
-                    className="bg-[#FAF6F4] rounded-2xl overflow-hidden border border-stone-200/80 shadow-xs flex flex-col justify-between group"
+                    className="bg-[#FBF5E6] rounded-2xl overflow-hidden border border-stone-200/80 shadow-xs flex flex-col justify-between group"
                   >
                     <div className="aspect-[4/5] relative bg-stone-100 overflow-hidden">
                       <Image
@@ -1592,11 +1574,11 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               })}
             </div>
           ) : (
-            <div className="text-center py-12 px-4 bg-[#FAF6F4] rounded-3xl border border-stone-200/80 max-w-xl mx-auto space-y-3">
+            <div className="text-center py-12 px-4 bg-[#FBF5E6] rounded-3xl border border-stone-200/80 max-w-xl mx-auto space-y-3">
               <div className="w-12 h-12 rounded-full bg-stone-100 text-stone-400 flex items-center justify-center mx-auto border border-stone-200">
                 <Star className="w-6 h-6 text-stone-300 fill-stone-100" />
               </div>
-              <h3 className="font-serif font-bold text-base text-stone-900">
+              <h3 className="lp-display font-bold text-base text-stone-900">
                 No Reviews Yet for this Product
               </h3>
               <p className="text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
@@ -1606,26 +1588,27 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
           )}
         </div>
       </section>
+      )}
 
       {/* ─── SECTION 5: CHECKOUT ORDER FORM (id="checkout-form") ────────── */}
-      <section id="checkout-form" className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 scroll-mt-14">
+      <section id="checkout-form" className="lp-framed relative py-12 px-5 scroll-mt-14 bg-[#F8ECCC]">
         <div className="max-w-5xl mx-auto">
           {/* Header */}
           <div className="text-center space-y-1.5 pb-8 max-w-2xl mx-auto">
-            <span className="inline-flex items-center gap-1 px-3.5 py-1 bg-[#FDF2F3] text-[#800020] font-extrabold text-[11px] rounded-full uppercase tracking-wider">
-              <Flame className="w-3 h-3 fill-[#800020]" /> CHECK-OUT FORM
+            <span className="inline-flex items-center gap-1 px-3.5 py-1 bg-[#FBF3E1] text-[#8A6410] font-extrabold text-[11px] rounded-full uppercase tracking-wider">
+              <Flame className="w-3 h-3 fill-[#8A6410]" /> CHECK-OUT FORM
             </span>
-            <h2 className="font-serif text-2xl sm:text-3xl font-extrabold text-[#7A0C14] uppercase">
+            <h2 className="lp-display text-2xl font-extrabold text-[#4A3508] uppercase">
               FILL IN THE FORM BELOW TO CONFIRM YOUR ORDER
             </h2>
-            <p className="text-xs sm:text-sm text-stone-500">
+            <p className="text-xs text-stone-500">
               No advance payment required. 100% Cash on delivery.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="grid grid-cols-1 gap-8 items-start">
             {/* Left: Product & Pricing Summary (col-span-5) */}
-            <div className="lg:col-span-5 bg-white rounded-3xl border border-stone-200 shadow-sm p-5 sm:p-6 space-y-5">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-5 space-y-5">
               <div className="flex items-center justify-between border-b border-stone-100 pb-3">
                 <span className="text-xs font-extrabold uppercase tracking-wider text-stone-600">Order Summary</span>
                 <span className="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-full border border-emerald-200">
@@ -1639,18 +1622,18 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   <Image src={activeImage} alt={product.name} fill className="object-cover object-top" />
                 </div>
                 <div className="space-y-1 min-w-0">
-                  <h3 className="font-serif font-bold text-xs sm:text-sm text-stone-900 leading-snug line-clamp-2">
+                  <h3 className="lp-display font-bold text-xs text-stone-900 leading-snug line-clamp-2">
                     {product.name}
                   </h3>
                   <p className="text-xs text-stone-500">
-                    Color: <strong className="text-[#800020]">{selectedColor}</strong>
+                    Color: <strong className="text-[#8A6410]">{selectedColor}</strong>
                   </p>
-                  <p className="font-mono text-sm font-black text-[#800020]">৳{offerPrice}</p>
+                  <p className="lp-display tabular-nums text-sm font-black text-[#8A6410]">৳{offerPrice}</p>
                 </div>
               </div>
 
               {/* Quantity Counter */}
-              <div className="flex items-center justify-between p-3 bg-[#FAF6F4] rounded-2xl border border-stone-200">
+              <div className="flex items-center justify-between p-3 bg-[#FBF5E6] rounded-2xl border border-stone-200">
                 <span className="text-xs font-bold text-stone-700">Quantity:</span>
                 <div className="flex items-center gap-2 bg-white rounded-xl border border-stone-200 p-1">
                   <button
@@ -1660,7 +1643,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   >
                     -
                   </button>
-                  <span className="font-mono font-bold text-xs px-2 text-stone-900">{quantity}</span>
+                  <span className="lp-display tabular-nums font-bold text-xs px-2 text-stone-900">{quantity}</span>
                   <button
                     type="button"
                     onClick={() => setQuantity((q) => q + 1)}
@@ -1672,18 +1655,24 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               </div>
 
               {/* Price Calculation Box */}
-              <div className="bg-[#FAF6F4] rounded-2xl p-4 border border-stone-200 space-y-2 text-xs">
+              <div className="bg-[#FBF5E6] rounded-2xl p-4 border border-stone-200 space-y-2 text-xs">
                 <div className="flex justify-between items-center text-stone-600">
                   <span className="uppercase font-semibold text-[11px]">Subtotal:</span>
-                  <span className="font-mono font-bold text-stone-900">৳{subtotal}</span>
+                  <span className="lp-display tabular-nums font-bold text-stone-900">৳{subtotal}</span>
                 </div>
+                {comboDiscount > 0 && (
+                  <div className="flex justify-between items-center text-[#2F6B3F]">
+                    <span className="uppercase font-semibold text-[11px]">Combo Discount:</span>
+                    <span className="lp-display tabular-nums font-bold">-৳{comboDiscount}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center text-stone-600">
                   <span className="uppercase font-semibold text-[11px]">Delivery Fee:</span>
-                  <span className="font-mono font-bold text-stone-900">৳{deliveryFee}</span>
+                  <span className="lp-display tabular-nums font-bold text-stone-900">৳{deliveryFee}</span>
                 </div>
                 <div className="flex justify-between items-center pt-2 border-t border-stone-200 text-sm font-extrabold text-stone-900">
                   <span className="uppercase text-[11px] font-black">Total Payable:</span>
-                  <span className="font-mono text-[#800020] text-xl font-black">
+                  <span className="lp-display tabular-nums text-[#8A6410] text-xl font-black">
                     ৳{totalPayable}
                   </span>
                 </div>
@@ -1696,18 +1685,18 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   <span>100% Cash on delivery — inspect before paying</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-[#800020] shrink-0" />
+                  <Truck className="w-4 h-4 text-[#8A6410] shrink-0" />
                   <span>Nationwide express delivery (Dhaka & outside)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <RotateCcw className="w-4 h-4 text-[#800020] shrink-0" />
+                  <RotateCcw className="w-4 h-4 text-[#8A6410] shrink-0" />
                   <span>Doorstep parcel inspection before acceptance</span>
                 </div>
               </div>
             </div>
 
             {/* Right: Checkout Form Fields (col-span-7) */}
-            <div className="lg:col-span-7 bg-white rounded-3xl border border-stone-200 shadow-xl p-6 sm:p-8 space-y-5">
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-xl p-6 space-y-5">
               <form onSubmit={handleOrderSubmit} className="space-y-5">
                 {/* Account Status / Fast Sign-in Badge */}
                 {sessionUser ? (
@@ -1734,8 +1723,11 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     </button>
                   </div>
                 ) : (
-                  <div className="px-3.5 py-2.5 bg-[#FAF6F4] border border-stone-200/90 rounded-2xl flex items-center justify-between text-xs text-stone-600">
-                    <span className="text-[11px]">Already have a Falak Closet account?</span>
+                  <div className="px-3.5 py-2.5 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl flex items-center justify-between text-xs text-emerald-900">
+                    <span className="text-[11px] font-semibold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                      গেস্ট চেকআউট: একাউন্ট খোলার প্রয়োজন নেই (সরাসরি অর্ডার করুন)
+                    </span>
                     <button
                       type="button"
                       onClick={() => {
@@ -1745,25 +1737,25 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                         setAuthModalError('');
                         setShowAuthModal(true);
                       }}
-                      className="font-bold text-[#800020] hover:text-[#5B060B] hover:underline cursor-pointer flex items-center gap-1 text-[11px]"
+                      className="font-bold text-[#8A6410] hover:text-[#5C440B] hover:underline cursor-pointer flex items-center gap-1 text-[11px] shrink-0 ml-2"
                     >
-                      <LogIn className="w-3.5 h-3.5" /> Sign In Here
+                      <LogIn className="w-3.5 h-3.5" /> সাইন ইন
                     </button>
                   </div>
                 )}
 
                 {/* Shipping & Contact Details */}
-                <div className="bg-white p-4 sm:p-6 rounded-3xl border border-[#F8D2D5] shadow-xs space-y-4">
+                <div className="bg-white p-4 rounded-3xl border border-[#EBD9A6] shadow-xs space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <h2 className="font-bold text-base sm:text-lg text-stone-900 flex items-center gap-2">
-                      <span className="w-7 h-7 rounded-full bg-[#A80C14]/10 text-[#A80C14] text-xs font-black flex items-center justify-center shrink-0">
+                    <h2 className="font-bold text-base text-stone-900 flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-full bg-[#9A700F]/10 text-[#9A700F] text-xs font-black flex items-center justify-center shrink-0">
                         2
                       </span>
                       Shipping &amp; Contact Details
                     </h2>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div className="grid grid-cols-1 gap-3 ">
                     <Field
                       label="Full Name"
                       name="fullName"
@@ -1793,7 +1785,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     />
 
                     {/* Unified Single Full Address Field (Division, District, Full Address combined) */}
-                    <div className="sm:col-span-2 space-y-2">
+                    <div className="space-y-2">
                       <Field
                         label="Full Address / সম্পূর্ণ ঠিকানা (District, Thana/Area, Road/House)"
                         name="street"
@@ -1815,7 +1807,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                             <span className="font-semibold truncate">{parsedAddress.badgeLabelBn}</span>
                           </div>
-                          <span className="font-bold text-[#A80C14] bg-white px-2.5 py-0.5 rounded-lg border border-rose-100 shadow-xs shrink-0 ml-2">
+                          <span className="font-bold text-[#9A700F] bg-white px-2.5 py-0.5 rounded-lg border border-amber-100 shadow-xs shrink-0 ml-2">
                             {effectiveShippingFee === 0 ? 'ফ্রি ডেলিভারি' : `৳ ${effectiveShippingFee}`}
                           </span>
                         </div>
@@ -1829,20 +1821,20 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   </div>
 
                   {/* Delivery Fee Info Banner with Active Tier Highlight */}
-                  <div className="p-3.5 bg-rose-50/60 border border-[#F8D2D5] rounded-2xl text-xs text-stone-700 space-y-2">
+                  <div className="p-3.5 bg-amber-50/60 border border-[#EBD9A6] rounded-2xl text-xs text-stone-700 space-y-2">
                     <div className="flex items-center justify-between font-bold text-stone-900 flex-wrap gap-1">
-                      <span className="flex items-center gap-1.5 text-[#A80C14]">
+                      <span className="flex items-center gap-1.5 text-[#9A700F]">
                         <Truck className="w-4 h-4" /> Standard Delivery Rates
                       </span>
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
                           onClick={() => setIsPolicyModalOpen(true)}
-                          className="text-[11px] text-[#A80C14] hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                          className="text-[11px] text-[#9A700F] hover:underline font-bold flex items-center gap-1 cursor-pointer"
                         >
                           <Info className="w-3.5 h-3.5" /> শর্তাবলী দেখুন
                         </button>
-                        <span className="font-mono font-bold text-xs text-[#A80C14]">
+                        <span className="lp-display tabular-nums font-bold text-xs text-[#9A700F]">
                           {effectiveShippingFee === 0 ? 'Free Shipping' : `৳ ${effectiveShippingFee}`}
                         </span>
                       </div>
@@ -1851,8 +1843,8 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       <span
                         className={`px-2 py-0.5 rounded-md transition-colors ${
                           parsedAddress.tier === 'dhaka_core' && parsedAddress.isRecognized
-                            ? 'bg-[#A80C14] text-white font-bold shadow-xs'
-                            : 'text-stone-600 bg-white/70 border border-[#F8D2D5]'
+                            ? 'bg-[#9A700F] text-white font-bold shadow-xs'
+                            : 'text-stone-600 bg-white/70 border border-[#EBD9A6]'
                         }`}
                       >
                         Inside Dhaka: <strong>৳80</strong>
@@ -1860,8 +1852,8 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       <span
                         className={`px-2 py-0.5 rounded-md transition-colors ${
                           parsedAddress.tier === 'dhaka_subarea' && parsedAddress.isRecognized
-                            ? 'bg-[#A80C14] text-white font-bold shadow-xs'
-                            : 'text-stone-600 bg-white/70 border border-[#F8D2D5]'
+                            ? 'bg-[#9A700F] text-white font-bold shadow-xs'
+                            : 'text-stone-600 bg-white/70 border border-[#EBD9A6]'
                         }`}
                       >
                         Sub-area Dhaka: <strong>৳100</strong>
@@ -1869,8 +1861,8 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       <span
                         className={`px-2 py-0.5 rounded-md transition-colors ${
                           (parsedAddress.tier === 'outside_dhaka' || !parsedAddress.isRecognized) && effectiveShippingFee === 150
-                            ? 'bg-[#A80C14] text-white font-bold shadow-xs'
-                            : 'text-stone-600 bg-white/70 border border-[#F8D2D5]'
+                            ? 'bg-[#9A700F] text-white font-bold shadow-xs'
+                            : 'text-stone-600 bg-white/70 border border-[#EBD9A6]'
                         }`}
                       >
                         Outside Dhaka: <strong>৳150</strong>
@@ -1890,12 +1882,12 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-4 bg-[#800020] hover:bg-[#660019] disabled:opacity-60 text-white font-extrabold text-sm sm:text-base rounded-xl shadow-xl hover:shadow-2xl transition-all cursor-pointer flex items-center justify-center gap-2 uppercase tracking-wide animate-pulse"
+                  className="w-full py-4 lp-cta disabled:opacity-60 font-extrabold text-sm rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 uppercase tracking-wide"
                 >
                   {isSubmitting ? (
                     <span>PROCESSING ORDER...</span>
                   ) : (
-                    <span>CONFIRM ORDER (CASH ON DELIVERY) — ৳{totalPayable}</span>
+                    <span>CONFIRM ORDER (CASH ON DELIVERY) ৳{totalPayable}</span>
                   )}
                 </button>
 
@@ -1908,25 +1900,34 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
         </div>
       </section>
 
-      {/* ─── SECTION 6: TRUST BADGES, FOOTER & FLOATING SUPPORT ─────────── */}
-      {/* 1. Trust Bar (3 items flex row) */}
-      <section className="py-6 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex items-center justify-center gap-3">
-            <Truck className="w-5 h-5 text-[#800020]" />
-            <span className="text-xs font-bold text-stone-800">Fast Delivery</span>
-          </div>
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex items-center justify-center gap-3">
-            <ShieldCheck className="w-5 h-5 text-[#800020]" />
-            <span className="text-xs font-bold text-stone-800">Cash On Delivery</span>
-          </div>
-          <div className="bg-white rounded-2xl p-4 border border-stone-200/80 shadow-xs flex items-center justify-center gap-3">
-            <RotateCcw className="w-5 h-5 text-[#800020]" />
-            <span className="text-xs font-bold text-stone-800">Doorstep Inspection Policy</span>
-          </div>
+      {/* ─── FAQ SECTION ─────────────────────────────────────────────────── */}
+      <section className="px-5 py-9">
+        <p className="text-xs font-bold tracking-[0.12em] uppercase text-[#8A6410]">সাধারণ প্রশ্ন</p>
+        <h2 className="mt-1.5 text-[26px] leading-tight font-bold text-[#33260F] text-balance">
+          আপনার মনে যে প্রশ্নগুলো আসতে পারে
+        </h2>
+        <div className="mt-2">
+          {faqItems.map((item, i) => (
+            <details key={item.q} open={i === 0} className="group mt-2.5 rounded-[14px] border border-[#E7D5A8] bg-white">
+              <summary className="cursor-pointer list-none flex items-center justify-between gap-3 px-4 py-3.5 font-semibold [&::-webkit-details-marker]:hidden">
+                <span>{item.q}</span>
+                <span className="text-[22px] leading-none text-[#8A6410] group-open:hidden" aria-hidden="true">+</span>
+                <span className="text-[22px] leading-none text-[#8A6410] hidden group-open:inline" aria-hidden="true">–</span>
+              </summary>
+              <p className="px-4 pb-3.5 text-[15px] text-[#6E5C3A]">{item.a}</p>
+            </details>
+          ))}
         </div>
+        <button
+          onClick={scrollToCheckout}
+          className="lp-cta mt-[18px] w-full flex items-center justify-center gap-2 rounded-[14px] px-5 py-4 text-lg font-bold cursor-pointer"
+        >
+          এখনই অর্ডার করুন <ArrowRight className="w-5 h-5" aria-hidden="true" />
+        </button>
       </section>
+      </div>
 
+      {/* ─── SECTION 6: TRUST BADGES, FOOTER & FLOATING SUPPORT ─────────── */}
       {/* 2. Footer Columns */}
       <footer className="bg-[#1C1917] text-stone-300 text-xs pt-12 pb-8 px-4 sm:px-6 lg:px-8 mt-8 border-t border-stone-800">
         <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 lg:gap-8 pb-10 border-b border-stone-800 text-left">
@@ -1952,15 +1953,15 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
 
             {/* Value Badges */}
             <div className="flex flex-wrap gap-2 pt-1">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] font-bold shadow-xs">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FBF3E1] border border-[#EBD9A6] text-[#9A700F] text-[10px] font-bold shadow-xs">
                 <Truck className="w-3.5 h-3.5 shrink-0" />
                 <span>Fast Delivery</span>
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] font-bold shadow-xs">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FBF3E1] border border-[#EBD9A6] text-[#9A700F] text-[10px] font-bold shadow-xs">
                 <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                 <span>All Active</span>
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FDF2F3] border border-[#F8D2D5] text-[#A80C14] text-[10px] font-bold shadow-xs">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FBF3E1] border border-[#EBD9A6] text-[#9A700F] text-[10px] font-bold shadow-xs">
                 <Crown className="w-3.5 h-3.5 shrink-0" />
                 <span>Modest style</span>
               </span>
@@ -1974,7 +1975,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 rel="noreferrer"
                 aria-label="Instagram"
                 title="Instagram"
-                className="group p-2.5 bg-[#FDF2F3] hover:bg-[#A80C14] text-[#A80C14] hover:text-white rounded-full transition-colors border border-[#F8D2D5]/80 flex items-center justify-center cursor-pointer"
+                className="group p-2.5 bg-[#FBF3E1] hover:bg-[#9A700F] text-[#9A700F] hover:text-white rounded-full transition-colors border border-[#EBD9A6]/80 flex items-center justify-center cursor-pointer"
               >
                 <svg className="w-5 h-5 fill-current transition-colors" viewBox="0 0 24 24">
                   <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
@@ -1986,7 +1987,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 rel="noreferrer"
                 aria-label="Facebook"
                 title="Facebook"
-                className="group p-2.5 bg-[#FDF2F3] hover:bg-[#A80C14] text-[#A80C14] hover:text-white rounded-full transition-colors border border-[#F8D2D5]/80 flex items-center justify-center cursor-pointer"
+                className="group p-2.5 bg-[#FBF3E1] hover:bg-[#9A700F] text-[#9A700F] hover:text-white rounded-full transition-colors border border-[#EBD9A6]/80 flex items-center justify-center cursor-pointer"
               >
                 <svg className="w-5 h-5 fill-current transition-colors" viewBox="0 0 24 24">
                   <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
@@ -1998,7 +1999,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 rel="noreferrer"
                 aria-label="WhatsApp"
                 title="WhatsApp"
-                className="group p-2.5 bg-[#FDF2F3] hover:bg-[#A80C14] text-[#A80C14] hover:text-white rounded-full transition-colors border border-[#F8D2D5]/80 flex items-center justify-center cursor-pointer"
+                className="group p-2.5 bg-[#FBF3E1] hover:bg-[#9A700F] text-[#9A700F] hover:text-white rounded-full transition-colors border border-[#EBD9A6]/80 flex items-center justify-center cursor-pointer"
               >
                 <svg className="w-5 h-5 fill-current transition-colors" viewBox="0 0 24 24">
                   <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
@@ -2072,16 +2073,16 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
 
       {/* Sticky Mobile Bottom Bar: visible past hero, hidden when reaching checkout form */}
       {showStickyBar && (
-        <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-[#F8D2D5] px-4 py-2.5 shadow-2xl flex items-center justify-between gap-3 animate-in slide-in-from-bottom duration-300">
+        <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[480px] z-40 bg-[#FFFCF5]/95 backdrop-blur-md border-t border-[#E7D5A8] px-4 py-2.5 shadow-2xl flex items-center justify-between gap-3 animate-in slide-in-from-bottom duration-300">
           <div>
-            <p className="text-[10px] text-stone-400 line-through font-mono">৳{regularPrice}</p>
-            <p className="font-mono font-black text-lg text-[#800020] leading-tight">
+            <p className="text-[10px] text-stone-400 line-through lp-display tabular-nums">৳{regularPrice}</p>
+            <p className="lp-display tabular-nums font-black text-lg text-[#8A6410] leading-tight">
               ৳{offerPrice}
             </p>
           </div>
           <button
             onClick={scrollToCheckout}
-            className="flex-1 py-3 bg-[#800020] hover:bg-[#660019] text-white font-extrabold text-xs rounded-full shadow-md transition-all cursor-pointer flex items-center justify-center gap-1.5 uppercase"
+            className="flex-1 py-3 lp-cta font-extrabold text-xs rounded-full transition-all cursor-pointer flex items-center justify-center gap-1.5 uppercase"
           >
             <ShoppingBag className="w-4 h-4" />
             <span>Order Now</span>
@@ -2094,7 +2095,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl border border-stone-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200 text-left">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-[#800020] to-[#5B060B] text-white p-6 relative">
+            <div className="bg-gradient-to-r from-[#8A6410] to-[#5C440B] text-white p-6 relative">
               <button
                 type="button"
                 onClick={() => {
@@ -2115,12 +2116,12 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 )}
               </div>
 
-              <h3 className="font-serif font-extrabold text-xl text-white">
+              <h3 className="lp-display font-extrabold text-xl text-white">
                 {authMode === 'signin'
                   ? 'Sign In to Confirm Order'
                   : 'Create Account to Confirm Order'}
               </h3>
-              <p className="text-xs text-rose-100/90 mt-1 leading-relaxed">
+              <p className="text-xs text-amber-100/90 mt-1 leading-relaxed">
                 {authMode === 'signin'
                   ? 'Welcome back! Please enter your password to place this order under your account.'
                   : 'Set a password to create your Falak Closet account and complete your order.'}
@@ -2130,18 +2131,18 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
             {/* Modal Body */}
             <div className="p-6 space-y-4">
               {/* Customer summary card */}
-              <div className="p-3 bg-[#FAF6F4] rounded-2xl border border-stone-200 text-xs space-y-1">
+              <div className="p-3 bg-[#FBF5E6] rounded-2xl border border-stone-200 text-xs space-y-1">
                 <div className="flex justify-between items-center text-stone-600">
                   <span>Name:</span>
                   <span className="font-bold text-stone-900">{fullName || 'Customer'}</span>
                 </div>
                 <div className="flex justify-between items-center text-stone-600">
                   <span>Phone Number:</span>
-                  <span className="font-mono font-bold text-stone-900">{phone}</span>
+                  <span className="lp-display tabular-nums font-bold text-stone-900">{phone}</span>
                 </div>
                 <div className="flex justify-between items-center text-stone-600 pt-1 border-t border-stone-200/80">
                   <span>Order Total:</span>
-                  <span className="font-mono font-black text-[#800020]">৳{totalPayable}</span>
+                  <span className="lp-display tabular-nums font-black text-[#8A6410]">৳{totalPayable}</span>
                 </div>
               </div>
 
@@ -2167,7 +2168,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                         value={authPassword}
                         onChange={(e) => setAuthPassword(e.target.value)}
                         placeholder="Enter your account password"
-                        className="w-full text-xs sm:text-sm px-4 py-3 pr-10 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
+                        className="w-full text-xs sm:text-sm px-4 py-3 pr-10 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8A6410]/20 focus:border-[#8A6410]"
                       />
                       <button
                         type="button"
@@ -2188,7 +2189,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     <Link
                       href="/account?type=forgot"
                       target="_blank"
-                      className="text-[#800020] font-bold hover:underline"
+                      className="text-[#8A6410] font-bold hover:underline"
                     >
                       Forgot password?
                     </Link>
@@ -2197,7 +2198,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   <button
                     type="submit"
                     disabled={isSubmittingAuthModal}
-                    className="w-full py-3.5 bg-[#800020] hover:bg-[#660019] disabled:opacity-60 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 uppercase tracking-wide"
+                    className="w-full py-3.5 bg-[#8A6410] hover:bg-[#6E4F0C] disabled:opacity-60 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 uppercase tracking-wide"
                   >
                     {isSubmittingAuthModal ? (
                       <span>Verifying &amp; Placing Order...</span>
@@ -2209,7 +2210,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     )}
                   </button>
 
-                  <div className="text-center pt-2 border-t border-stone-100">
+                  <div className="text-center pt-2 border-t border-stone-100 space-y-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -2218,10 +2219,20 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                         setAuthConfirmPassword('');
                         setAuthModalError('');
                       }}
-                      className="text-xs text-stone-600 hover:text-[#800020] font-semibold cursor-pointer"
+                      className="text-xs text-stone-600 hover:text-[#8A6410] font-semibold cursor-pointer block mx-auto"
                     >
                       Don&apos;t have an account yet?{' '}
-                      <span className="text-[#800020] font-bold underline">Create New Account</span>
+                      <span className="text-[#8A6410] font-bold underline">Create New Account</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setShowAuthModal(false);
+                        await executeOrderSubmission(null);
+                      }}
+                      className="w-full py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      একাউন্ট ছাড়াই সরাসরি অর্ডার সম্পন্ন করুন (Guest Checkout)
                     </button>
                   </div>
                 </form>
@@ -2236,7 +2247,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       value={authEmail}
                       onChange={(e) => setAuthEmail(e.target.value)}
                       placeholder="e.g. yourname@gmail.com (optional)"
-                      className="w-full text-xs sm:text-sm px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
+                      className="w-full text-xs sm:text-sm px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8A6410]/20 focus:border-[#8A6410]"
                     />
                   </div>
 
@@ -2253,7 +2264,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                         value={authPassword}
                         onChange={(e) => setAuthPassword(e.target.value)}
                         placeholder="Set password (min 6 characters)"
-                        className="w-full text-xs sm:text-sm px-4 py-2.5 pr-10 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
+                        className="w-full text-xs sm:text-sm px-4 py-2.5 pr-10 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8A6410]/20 focus:border-[#8A6410]"
                       />
                       <button
                         type="button"
@@ -2281,7 +2292,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                       value={authConfirmPassword}
                       onChange={(e) => setAuthConfirmPassword(e.target.value)}
                       placeholder="Re-enter password"
-                      className="w-full text-xs sm:text-sm px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020]"
+                      className="w-full text-xs sm:text-sm px-4 py-2.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#8A6410]/20 focus:border-[#8A6410]"
                     />
                     {authConfirmPassword && (
                       <p
@@ -2300,7 +2311,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   <button
                     type="submit"
                     disabled={isSubmittingAuthModal}
-                    className="w-full py-3.5 bg-[#800020] hover:bg-[#660019] disabled:opacity-60 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 uppercase tracking-wide mt-2"
+                    className="w-full py-3.5 bg-[#8A6410] hover:bg-[#6E4F0C] disabled:opacity-60 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-xl transition-all cursor-pointer flex items-center justify-center gap-2 uppercase tracking-wide mt-2"
                   >
                     {isSubmittingAuthModal ? (
                       <span>Creating Account &amp; Placing Order...</span>
@@ -2312,7 +2323,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                     )}
                   </button>
 
-                  <div className="text-center pt-2 border-t border-stone-100">
+                  <div className="text-center pt-2 border-t border-stone-100 space-y-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -2321,10 +2332,20 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                         setAuthConfirmPassword('');
                         setAuthModalError('');
                       }}
-                      className="text-xs text-stone-600 hover:text-[#800020] font-semibold cursor-pointer"
+                      className="text-xs text-stone-600 hover:text-[#8A6410] font-semibold cursor-pointer block mx-auto"
                     >
                       Already have an account?{' '}
-                      <span className="text-[#800020] font-bold underline">Sign In</span>
+                      <span className="text-[#8A6410] font-bold underline">Sign In</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setShowAuthModal(false);
+                        await executeOrderSubmission(null);
+                      }}
+                      className="w-full py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      একাউন্ট ছাড়াই সরাসরি অর্ডার সম্পন্ন করুন (Guest Checkout)
                     </button>
                   </div>
                 </form>
@@ -2344,7 +2365,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
         >
           <div className="bg-white rounded-t-3xl sm:rounded-3xl border border-stone-200 max-w-xl w-full shadow-2xl overflow-hidden text-stone-900 flex flex-col max-h-[90vh]">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-[#A80C14] to-[#8C0A10] text-white p-4 sm:p-5 text-left relative shrink-0">
+            <div className="bg-gradient-to-r from-[#9A700F] to-[#8C0A10] text-white p-4 sm:p-5 text-left relative shrink-0">
               <button
                 type="button"
                 onClick={() => setIsPolicyModalOpen(false)}
@@ -2361,7 +2382,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                   <h3 className="font-extrabold text-base sm:text-lg leading-tight">
                     ডেলিভারি ও অর্ডার নিয়মাবলী
                   </h3>
-                  <p className="text-[11px] text-rose-100/90 font-medium">
+                  <p className="text-[11px] text-amber-100/90 font-medium">
                     Falak Closet — Order &amp; Delivery Policy
                   </p>
                 </div>
@@ -2386,7 +2407,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               {/* 2. Delivery Fee Rates */}
               <div className="space-y-2 pt-4">
                 <div className="flex items-center gap-2 font-extrabold text-stone-900 text-sm">
-                  <span className="w-6 h-6 rounded-lg bg-rose-100 text-[#A80C14] text-xs flex items-center justify-center shrink-0">
+                  <span className="w-6 h-6 rounded-lg bg-amber-100 text-[#9A700F] text-xs flex items-center justify-center shrink-0">
                     <Truck className="w-3.5 h-3.5" />
                   </span>
                   <span>ডেলিভারি চার্জ (Delivery Charges)</span>
@@ -2394,15 +2415,15 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="p-3 bg-stone-50 border border-stone-200/80 rounded-2xl text-center space-y-0.5">
                     <span className="block text-[10px] text-stone-500 font-semibold">ঢাকার মধ্যে</span>
-                    <span className="block font-black text-sm text-[#A80C14]">৳ ৮০</span>
+                    <span className="block font-black text-sm text-[#9A700F]">৳ ৮০</span>
                   </div>
                   <div className="p-3 bg-stone-50 border border-stone-200/80 rounded-2xl text-center space-y-0.5">
                     <span className="block text-[10px] text-stone-500 font-semibold">ঢাকার পাশ্ববর্তী এরিয়া</span>
-                    <span className="block font-black text-sm text-[#A80C14]">৳ ১০০</span>
+                    <span className="block font-black text-sm text-[#9A700F]">৳ ১০০</span>
                   </div>
                   <div className="p-3 bg-stone-50 border border-stone-200/80 rounded-2xl text-center space-y-0.5">
                     <span className="block text-[10px] text-stone-500 font-semibold">ঢাকার বাহিরে</span>
-                    <span className="block font-black text-sm text-[#A80C14]">৳ ১৫০</span>
+                    <span className="block font-black text-sm text-[#9A700F]">৳ ১৫০</span>
                   </div>
                 </div>
               </div>
@@ -2417,23 +2438,23 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
                 </div>
                 <ul className="space-y-2 text-stone-700 font-medium pl-1">
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>নাম, ফোন নম্বর ও ঠিকানা দিয়ে অর্ডার কনফার্ম করুন।</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">🍂</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">🍂</span>
                     <span>আমাদের সব পণ্যের দাম ফিক্সড।</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>পেইজ থেকে কনফার্মেশন কল দেওয়া হবে। কনফার্মেশন কলটি রিসিভ করার পর পার্সেলটি পাঠানো হবে।</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>কলে কনফার্ম করার পর অর্ডার ক্যান্সেল বা চেঞ্জ করা হয় না।</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>কনফার্মেশন কল পাওয়ার পর ২-৩ দিনে পার্সেল পাবেন।</span>
                   </li>
                 </ul>
@@ -2455,26 +2476,26 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               {/* 5. Return & Parcel Checking Policy */}
               <div className="space-y-2 pt-4">
                 <div className="flex items-center gap-2 font-extrabold text-stone-900 text-sm">
-                  <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-800 text-xs flex items-center justify-center shrink-0">
+                  <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 text-xs flex items-center justify-center shrink-0">
                     <RotateCcw className="w-3.5 h-3.5" />
                   </span>
                   <span>পার্সেল চেক ও রিটার্ন পলিসি</span>
                 </div>
                 <ul className="space-y-2 text-stone-700 font-medium pl-1">
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>ডেলিভারী ম্যানের সামনে পার্সেল চেক করে নিবেন।</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>আমাদের পার্সেল রিটার্ন করতে হলে সম্পূর্ণ পার্সেল রিটার্ন করে দিবেন ডেলিভারী খরচ দিয়ে।</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>আমাদের পেইজ থেকে কোনো পার্সিয়াল ডেলিভারী দেওয়া হয় না।</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="text-[#A80C14] shrink-0 font-bold">•</span>
+                    <span className="text-[#9A700F] shrink-0 font-bold">•</span>
                     <span>পার্সেলটি রিসিভ করার পর আমাদের পেইজ থেকে রিটার্ন নেওয়া হয় না।</span>
                   </li>
                 </ul>
@@ -2499,7 +2520,7 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
               <button
                 type="button"
                 onClick={() => setIsPolicyModalOpen(false)}
-                className="w-full sm:w-auto min-h-[44px] px-6 bg-[#A80C14] hover:bg-[#8C0A10] active:scale-95 text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+                className="w-full sm:w-auto min-h-[44px] px-6 bg-[#9A700F] hover:bg-[#8C0A10] active:scale-95 text-white font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>বুঝেছি, অর্ডার সম্পন্ন করুন</span>

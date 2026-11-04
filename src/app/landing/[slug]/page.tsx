@@ -1,10 +1,18 @@
 import React, { Suspense } from 'react';
 import { Metadata } from 'next';
+import { Fraunces } from 'next/font/google';
 import { notFound } from 'next/navigation';
 import { getProductBySlugOrId } from '@/lib/products';
 import { formatCurrency } from '@/lib/utils';
 import ProductSkeleton from '@/components/product/ProductSkeleton';
 import LandingPageClient from './LandingPageClient';
+
+const fraunces = Fraunces({
+  variable: '--lp-display',
+  subsets: ['latin'],
+  weight: ['600', '800'],
+  display: 'swap',
+});
 
 async function loadProduct(slug: string) {
   try {
@@ -105,8 +113,10 @@ export default async function LandingPage({
   if (!product) notFound();
 
   return (
-    <Suspense fallback={<ProductSkeleton />}>
-      <LandingPageClient initialProduct={product} />
-    </Suspense>
+    <div className={fraunces.variable}>
+      <Suspense fallback={<ProductSkeleton />}>
+        <LandingPageClient initialProduct={product} />
+      </Suspense>
+    </div>
   );
 }

@@ -278,6 +278,7 @@ export default function CheckoutClient() {
     products,
     freeShippingThreshold,
     quantityFreeDelivery,
+    announcement,
     updateQuantity,
   } = useCart();
   const { trackEvent } = useAnalytics();
@@ -569,9 +570,10 @@ export default function CheckoutClient() {
     return checkIsFreeDelivery(
       activeItems,
       subtotal,
-      Number(freeShippingThreshold)
+      Number(freeShippingThreshold),
+      announcement
     );
-  }, [activeItems, subtotal, freeShippingThreshold]);
+  }, [activeItems, subtotal, freeShippingThreshold, announcement]);
 
   const calculatedDeliveryFee = useMemo(() => {
     const selectedZoneObj = pathaoZones.find((z) => z.zone_id === selectedPathaoZoneId);
@@ -585,9 +587,10 @@ export default function CheckoutClient() {
       freeShippingThreshold: Number(freeShippingThreshold),
       isFreeDelivery: isFreeDeliveryUnlocked,
       items: activeItems,
+      announcement,
     });
     return result.fee;
-  }, [parsedAddress, formData.district, formData.city, formData.division, formData.street, subtotal, freeShippingThreshold, pathaoZones, selectedPathaoZoneId, isFreeDeliveryUnlocked, activeItems]);
+  }, [parsedAddress, formData.district, formData.city, formData.division, formData.street, subtotal, freeShippingThreshold, pathaoZones, selectedPathaoZoneId, isFreeDeliveryUnlocked, activeItems, announcement]);
 
   const effectiveShippingFee = isFreeDeliveryUnlocked ? 0 : calculatedDeliveryFee;
 
@@ -1364,6 +1367,12 @@ export default function CheckoutClient() {
                 <span className="w-7 h-7 rounded-full bg-[#A80C14]/10 text-[#A80C14] text-xs font-black flex items-center justify-center shrink-0">2</span>
                 Shipping &amp; Contact Details
               </h2>
+              {!user && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold shadow-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  গেস্ট চেকআউট (একাউন্ট খোলার প্রয়োজন নেই)
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">

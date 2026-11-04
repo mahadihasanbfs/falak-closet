@@ -177,6 +177,13 @@ export function matchZoneFromText(
   return null;
 }
 
+export interface AnnouncementOfferConfig {
+  isActive?: boolean;
+  freeDeliveryOffer?: boolean;
+  freeDeliveryMinQty?: number;
+  freeDeliveryCategory?: string;
+}
+
 export interface CalculateShippingFeeParams {
   division?: string | null;
   district?: string | null;
@@ -188,6 +195,7 @@ export interface CalculateShippingFeeParams {
   freeShippingThreshold?: number;
   isFreeDelivery?: boolean;
   items?: Array<{ product?: any; quantity?: number }> | null;
+  announcement?: AnnouncementOfferConfig | null;
 }
 
 export interface ShippingFeeResult {
@@ -200,11 +208,13 @@ export interface ShippingFeeResult {
  * Checks whether an order qualifies for free delivery either by:
  * 1. Meeting site-wide store free shipping threshold (subtotal >= freeShippingThreshold, where threshold > 0)
  * 2. Meeting product-level free delivery quantity threshold (ordered quantity of product >= product.freeDeliveryQuantity)
+ * 3. Meeting active announcement promotion quantity threshold (e.g. Any 8 Hijabs Free Delivery)
  */
 export function checkIsFreeDelivery(
   items: Array<{ product?: any; quantity?: number }> | null | undefined,
   subtotal: number = 0,
-  freeShippingThreshold: number = Infinity
+  freeShippingThreshold: number = Infinity,
+  announcementOffer?: AnnouncementOfferConfig | null
 ): boolean {
   const numThreshold = Number(freeShippingThreshold);
   if (!isNaN(numThreshold) && numThreshold > 0 && numThreshold < Infinity && subtotal > 0 && subtotal >= numThreshold) {
@@ -230,6 +240,39 @@ export function checkIsFreeDelivery(
         if (totalQty >= reqQty) {
           return true;
         }
+      }
+    }
+
+    // 3. Announcement-level quantity rule (e.g. "Buy Any 8 Hijabs Delivery Charge Free")
+    if (
+      announcementOffer &&
+      announcementOffer.isActive !== false &&
+      announcementOffer.freeDeliveryOffer !== false
+    ) {
+      const minQty =
+        typeof announcementOffer.freeDeliveryMinQty === 'number' && announcementOffer.freeDeliveryMinQty > 0
+          ? announcementOffer.freeDeliveryMinQty
+          : 8;
+      const targetCat = (announcementOffer.freeDeliveryCategory || 'hijab').toLowerCase();
+
+      let eligibleCount = 0;
+      for (const item of items) {
+        const prod = item?.product;
+        const qty = item?.quantity ?? 1;
+        if (targetCat === 'all') {
+          eligibleCount += qty;
+        } else {
+          const cat = (prod?.category || '').toLowerCase();
+          const subCat = (prod?.subCategory || '').toLowerCase();
+          const name = (prod?.name || '').toLowerCase();
+          if (cat === targetCat || subCat.includes(targetCat) || name.includes(targetCat)) {
+            eligibleCount += qty;
+          }
+        }
+      }
+
+      if (eligibleCount >= minQty) {
+        return true;
       }
     }
   }
@@ -258,8 +301,9 @@ export function calculateShippingFee({
   freeShippingThreshold = Infinity,
   isFreeDelivery = false,
   items = null,
+  announcement = null,
 }: CalculateShippingFeeParams): ShippingFeeResult {
-  const isUnlocked = isFreeDelivery || checkIsFreeDelivery(items, subtotal, freeShippingThreshold);
+  const isUnlocked = isFreeDelivery || checkIsFreeDelivery(items, subtotal, freeShippingThreshold, announcement);
 
   if (isUnlocked) {
     return {

@@ -39,7 +39,10 @@ const DEFAULT_SETTINGS = {
     message: '',
     link: '',
     linkLabel: '',
-    isActive: false
+    isActive: false,
+    freeDeliveryOffer: false,
+    freeDeliveryMinQty: 8,
+    freeDeliveryCategory: 'Hijab',
   },
   payment: {
     bkashNumber: '01700000000',
@@ -142,6 +145,11 @@ function validateSettingValue(key: string, value: unknown): string | null {
     if (a.message !== undefined && typeof a.message !== 'string') return 'Announcement message must be text';
     if (a.linkLabel !== undefined && typeof a.linkLabel !== 'string') return 'Announcement link label must be text';
     if (a.isActive !== undefined && typeof a.isActive !== 'boolean') return 'Announcement active flag must be true/false';
+    if (a.freeDeliveryOffer !== undefined && typeof a.freeDeliveryOffer !== 'boolean') return 'Announcement free delivery offer flag must be true/false';
+    if (a.freeDeliveryMinQty !== undefined && (!Number.isFinite(Number(a.freeDeliveryMinQty)) || Number(a.freeDeliveryMinQty) < 1)) {
+      return 'Announcement free delivery minimum quantity must be at least 1';
+    }
+    if (a.freeDeliveryCategory !== undefined && typeof a.freeDeliveryCategory !== 'string') return 'Announcement free delivery category must be text';
     const link = typeof a.link === 'string' ? a.link.trim() : '';
     if (link && !link.startsWith('/') && !/^https?:\/\//i.test(link)) {
       return 'Announcement link must be an internal path (/...) or an http(s) URL';

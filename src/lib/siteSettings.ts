@@ -43,6 +43,9 @@ export interface Announcement {
   link: string;
   linkLabel: string;
   isActive: boolean;
+  freeDeliveryOffer?: boolean;
+  freeDeliveryMinQty?: number;
+  freeDeliveryCategory?: string;
 }
 
 /** Matches DEFAULT_SETTINGS['site'] in /api/settings. */
@@ -164,11 +167,21 @@ export async function getValuePropsSafe(): Promise<ValuePropItem[]> {
 function parseAnnouncement(value: unknown): Announcement {
   const a = (value ?? {}) as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const num = (v: unknown, fallback: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+  const message = str(a.message);
   return {
-    message: str(a.message),
+    message,
     link: str(a.link),
     linkLabel: str(a.linkLabel),
     isActive: a.isActive === true,
+    freeDeliveryOffer: typeof a.freeDeliveryOffer === 'boolean'
+      ? a.freeDeliveryOffer
+      : /free|delivery|ডেলিভারি/i.test(message),
+    freeDeliveryMinQty: num(a.freeDeliveryMinQty, 8),
+    freeDeliveryCategory: str(a.freeDeliveryCategory) || 'Hijab',
   };
 }
 
@@ -177,6 +190,9 @@ export const EMPTY_ANNOUNCEMENT: Announcement = {
   link: '',
   linkLabel: '',
   isActive: false,
+  freeDeliveryOffer: false,
+  freeDeliveryMinQty: 8,
+  freeDeliveryCategory: 'Hijab',
 };
 
 export const getAnnouncement = unstable_cache(

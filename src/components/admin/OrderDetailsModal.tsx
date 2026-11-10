@@ -888,8 +888,8 @@ export function OrderDetailsModal({
               )}
             </div>
 
-            {/* Payment */}
-            <div className="bg-white rounded-2xl border border-stone-200 p-4 space-y-2.5">
+            {/* Payment (Desktop View) */}
+            <div className="hidden md:block bg-white rounded-2xl border border-stone-200 p-4 space-y-2.5">
               <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-stone-400 flex items-center gap-1.5">
                 <CreditCard className="w-3.5 h-3.5" /> Payment
               </p>
@@ -1003,6 +1003,57 @@ export function OrderDetailsModal({
                 );
               })}
             </div>
+          </div>
+
+          {/* Payment (Mobile View: Ordered Items এর নিচে) */}
+          <div className="md:hidden bg-white rounded-2xl border border-stone-200 p-4 space-y-2.5">
+            <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-stone-400 flex items-center gap-1.5">
+              <CreditCard className="w-3.5 h-3.5" /> Payment
+            </p>
+            <p className="text-[11px] font-bold text-stone-900">
+              {order.paymentMethod || 'Cash on Delivery'}
+            </p>
+            {isManualBkash && (
+              <div className="text-[11px] text-stone-600 space-y-1 pt-0.5">
+                <p>
+                  Sender: <span className="font-mono font-bold text-stone-900">{order.paymentSenderNumber || 'N/A'}</span>
+                </p>
+                <p>
+                  TrxID: <span className="font-mono font-bold text-[#9B050B]">{order.paymentTrxId || 'N/A'}</span>
+                </p>
+              </div>
+            )}
+            <p className="text-[11px] flex items-center gap-1.5">
+              <span className="text-stone-500">Status:</span>
+              <span
+                className={`font-black uppercase tracking-wide text-[10px] ${order.paymentStatus === 'Verified'
+                    ? 'text-emerald-700'
+                    : order.paymentStatus === 'Rejected'
+                      ? 'text-rose-700'
+                      : 'text-amber-700'
+                  }`}
+              >
+                {paymentStatusLabel}
+              </span>
+            </p>
+            {isPendingPayment && (
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onUpdatePaymentStatus(order.id, 'Verified')}
+                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors border border-emerald-800"
+                >
+                  Verify
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdatePaymentStatus(order.id, 'Rejected')}
+                  className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[10px] font-bold cursor-pointer transition-colors border border-rose-800"
+                >
+                  Reject
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Pricing breakdown */}

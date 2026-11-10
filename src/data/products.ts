@@ -78,6 +78,8 @@ export interface Product {
   freeDeliveryQuantity?: number;
   tierDiscounts?: ProductTierDiscount[];
   videoUrl?: string;
+  videoTitle?: string;
+  videoSubtitle?: string;
   landingDiscountPercentage?: number;
   /** ISO strings — Prisma `Date`s are serialized in `src/lib/products.ts` so they can cross to the client. */
   createdAt?: string;

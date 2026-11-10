@@ -1042,9 +1042,11 @@ export default function LandingPageClient({ initialProduct }: LandingPageClientP
         <section id="video-section" className="px-5 py-9 bg-[#33260F]">
           <p className="text-xs font-bold tracking-[0.12em] uppercase text-[#EBC862]">ভিডিওতে দেখুন</p>
           <h2 className="mt-1.5 text-[26px] leading-tight font-bold text-[#F3E2B0] text-balance">
-            হিজাবটা পরলে কেমন লাগে, নিজের চোখে দেখুন
+            {product.videoTitle || 'হিজাবটা পরলে কেমন লাগে, নিজের চোখে দেখুন'}
           </h2>
-          <p className="mt-2 text-[15px] text-[#F3E2B0]/80">কাপড়, কাজ আর রঙ ভিডিওতে ভালো করে দেখে নিন।</p>
+          <p className="mt-2 text-[15px] text-[#F3E2B0]/80">
+            {product.videoSubtitle || 'কাপড়, কাজ আর রঙ ভিডিওতে ভালো করে দেখে নিন।'}
+          </p>
           <div className="relative mt-[18px] rounded-2xl overflow-hidden bg-stone-900 border border-white/15 w-full aspect-video">
               {!videoStarted && (
                 <button

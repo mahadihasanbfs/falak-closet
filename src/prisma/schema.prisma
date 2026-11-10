@@ -208,6 +208,8 @@ model Product {
   weight               Float?             @default(0.5)
 
   videoUrl                   String?
+  videoTitle                 String?
+  videoSubtitle              String?
   landingDiscountPercentage  Float?
 
   createdAt          DateTime           @default(now())

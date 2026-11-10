@@ -34,6 +34,8 @@ export function LandingPagesTab() {
 
   // Form fields
   const [videoUrl, setVideoUrl] = useState<string>('');
+  const [videoTitle, setVideoTitle] = useState<string>('');
+  const [videoSubtitle, setVideoSubtitle] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -66,6 +68,8 @@ export function LandingPagesTab() {
   useEffect(() => {
     if (selectedProduct) {
       setVideoUrl(selectedProduct.videoUrl || '');
+      setVideoTitle(selectedProduct.videoTitle || '');
+      setVideoSubtitle(selectedProduct.videoSubtitle || '');
       setSaveSuccess(false);
       setUploadError(null);
     }
@@ -158,6 +162,8 @@ export function LandingPagesTab() {
     try {
       const payload: Record<string, any> = {
         videoUrl: videoUrl.trim() || null,
+        videoTitle: videoTitle.trim() || null,
+        videoSubtitle: videoSubtitle.trim() || null,
         landingDiscountPercentage: null,
       };
 
@@ -176,7 +182,13 @@ export function LandingPagesTab() {
       setProducts((prev) =>
         prev.map((p) =>
           p.id === selectedProduct.id
-            ? { ...p, videoUrl: payload.videoUrl, landingDiscountPercentage: undefined }
+            ? {
+                ...p,
+                videoUrl: payload.videoUrl,
+                videoTitle: payload.videoTitle,
+                videoSubtitle: payload.videoSubtitle,
+                landingDiscountPercentage: undefined,
+              }
             : p
         )
       );
@@ -430,6 +442,41 @@ export function LandingPagesTab() {
               <span className="px-2.5 py-0.5 bg-stone-100 text-stone-600 text-[10px] font-bold rounded-full">
                 Optional
               </span>
+            </div>
+
+            {/* Video Section Heading & Subtitle */}
+            <div className="space-y-4 pb-4 border-b border-stone-100">
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-700">
+                  Video Section Heading / Title (ভিডিও শিরোনাম)
+                </label>
+                <input
+                  type="text"
+                  value={videoTitle}
+                  onChange={(e) => setVideoTitle(e.target.value)}
+                  placeholder="হিজাবটা পরলে কেমন লাগে, নিজের চোখে দেখুন"
+                  className="w-full text-sm px-4 py-3 bg-[#FAF6F4] border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020] text-stone-900 placeholder:text-stone-400"
+                />
+                <p className="text-[11px] text-stone-400">
+                  Landing page-এর ভিডিও সেকশনের মূল শিরোনাম (বাংলা বা ইংরেজি)। ফাঁকা রাখলে ডিফল্ট শিরোনাম দেখাবে।
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-700">
+                  Video Section Subtitle (ভিডিও সাবটাইটেল - ঐচ্ছিক)
+                </label>
+                <input
+                  type="text"
+                  value={videoSubtitle}
+                  onChange={(e) => setVideoSubtitle(e.target.value)}
+                  placeholder="কাপড়, কাজ আর রঙ ভিডিওতে ভালো করে দেখে নিন।"
+                  className="w-full text-sm px-4 py-3 bg-[#FAF6F4] border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#800020]/20 focus:border-[#800020] text-stone-900 placeholder:text-stone-400"
+                />
+                <p className="text-[11px] text-stone-400">
+                  শিরোনামের নিচে দেখানো ছোট বিবরণ। ফাঁকা রাখলে ডিফল্ট বিবরণ দেখাবে।
+                </p>
+              </div>
             </div>
 
             {/* Video Upload Dropzone */}

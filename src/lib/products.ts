@@ -98,6 +98,8 @@ export function serializeProduct(row: ProductRow): Product {
       discountAmount: t.discountAmount,
     })),
     videoUrl: opt(row.videoUrl),
+    videoTitle: opt(row.videoTitle),
+    videoSubtitle: opt(row.videoSubtitle),
     landingDiscountPercentage: opt(row.landingDiscountPercentage),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -515,6 +517,14 @@ export function buildProductData(body: Raw, options: { partial?: boolean } = {})
 
   if (sent('videoUrl')) {
     data.videoUrl = toStr(body.videoUrl) || null;
+  }
+
+  if (sent('videoTitle')) {
+    data.videoTitle = toStr(body.videoTitle) || null;
+  }
+
+  if (sent('videoSubtitle')) {
+    data.videoSubtitle = toStr(body.videoSubtitle) || null;
   }
 
   if (sent('landingDiscountPercentage')) {

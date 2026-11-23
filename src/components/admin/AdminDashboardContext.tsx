@@ -533,15 +533,14 @@ function cleanReasonQueryParam() {
       return;
     }
 
-    // Best-effort destroy of every Cloudinary asset this product owned —
-    // only URLs under our falak-closet/ namespace ever match.
+    // Best-effort destroy of assets this product owned (database or Cloudinary)
     const ownedUrls = new Set<string>([
       ...(product?.images || []),
       ...(product?.colors || []).flatMap((c) => c.images || []),
     ]);
     for (const url of ownedUrls) {
       const publicId = cloudinaryPublicIdFromUrl(url);
-      if (publicId?.startsWith('falak-closet/')) {
+      if (publicId) {
         deleteCloudinaryImage(publicId);
       }
     }

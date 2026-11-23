@@ -472,7 +472,7 @@ export function HeroSlidesTab() {
                     required
                     value={formData.image}
                     onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                    placeholder="https://res.cloudinary.com/… or any image URL"
+                    placeholder="/api/images/… or any image URL"
                     className="flex-1 px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-[#A80C14]"
                   />
                   <ImageUploader
@@ -486,7 +486,7 @@ export function HeroSlidesTab() {
                   />
                 </div>
                 <p className="text-[10px] text-stone-400">
-                  Upload to Cloudinary or paste a URL — embedded (base64) images are not stored.
+                  Upload directly to the database or paste a URL — embedded (base64) images are not stored.
                 </p>
               </div>
 

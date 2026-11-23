@@ -1,9 +1,9 @@
 /**
- * cloudinary.ts — Reusable client-side helpers for the Cloudinary storage layer.
+ * cloudinary.ts — Media upload and management helpers.
  *
- * Uploads always go through the signed server route (/api/upload); this module
- * only shapes requests/results and derives cheap URL transforms. Nothing here
- * touches API secrets.
+ * Uploads are stored directly in the database (via POST /api/upload -> MongoDB)
+ * and served at `/api/images/[id]` without requiring third-party Cloudinary services.
+ * Cloudinary helpers remain for backwards compatibility with any existing delivery URLs.
  */
 
 export interface UploadedImage {
@@ -14,7 +14,7 @@ export interface UploadedImage {
 }
 
 /**
- * Upload one or many images via POST /api/upload.
+ * Upload one or many images via POST /api/upload directly to the database.
  * Uploads are sequential so `onProgress` stays meaningful; typical batches are
  * small (a handful of product photos) so parallelism isn't worth the complexity.
  */
@@ -41,11 +41,17 @@ export async function uploadImages(
     }
 
     const data = await res.json().catch(() => null);
-    if (!res.ok || !data?.success || !Array.isArray(data.results)) {
+    if (!res.ok || !data?.success) {
       throw new Error(data?.error || `Upload failed (HTTP ${res.status})`);
     }
 
-    for (const r of data.results) {
+    const list = Array.isArray(data.results)
+      ? data.results
+      : Array.isArray(data.uploaded)
+      ? data.uploaded
+      : [];
+
+    for (const r of list) {
       results.push({
         url: r.secureUrl || r.url,
         publicId: r.publicId,
@@ -59,20 +65,23 @@ export async function uploadImages(
   return results;
 }
 
-/** Best-effort Cloudinary asset cleanup — never throws, never blocks the UI. */
-export async function deleteCloudinaryImage(publicId: string): Promise<boolean> {
+/** Best-effort asset cleanup (database image or legacy Cloudinary) — never throws, never blocks UI. */
+export async function deleteCloudinaryImage(publicIdOrUrl: string): Promise<boolean> {
   try {
     const res = await fetch('/api/upload', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ publicId }),
+      body: JSON.stringify({ publicId: publicIdOrUrl }),
     });
     return res.ok;
   } catch (err) {
-    console.warn('[deleteCloudinaryImage] failed:', publicId, err);
+    console.warn('[deleteCloudinaryImage] failed:', publicIdOrUrl, err);
     return false;
   }
 }
+
+/** Alias for deleteCloudinaryImage */
+export const deleteStoredImage = deleteCloudinaryImage;
 
 /** True for Cloudinary delivery URLs (https://res.cloudinary.com/...). */
 export function isCloudinaryUrl(src: string): boolean {
@@ -80,12 +89,20 @@ export function isCloudinaryUrl(src: string): boolean {
 }
 
 /**
- * Parse the public id out of a delivery URL, e.g.
- * `.../image/upload/v1712345678/falak-closet/products/abc.jpg`
- *   → `falak-closet/products/abc`
- * Returns null for anything that isn't a plain Cloudinary URL.
+ * Parse the public id or database ID out of an image URL.
+ * E.g.:
+ *  `/api/images/65fa1234567890abcdef1234` → `65fa1234567890abcdef1234`
+ *  `.../image/upload/v1712345678/falak-closet/products/abc.jpg` → `falak-closet/products/abc`
  */
 export function cloudinaryPublicIdFromUrl(url: string): string | null {
+  if (typeof url !== 'string' || !url) return null;
+
+  // Check if it's a database-backed image
+  const dbMatch = url.match(/\/api\/images\/([a-f\d]{24})/i);
+  if (dbMatch) return dbMatch[1];
+  if (/^[a-f\d]{24}$/i.test(url.trim())) return url.trim();
+
+  // Legacy Cloudinary URLs
   if (!isCloudinaryUrl(url)) return null;
 
   try {
@@ -107,6 +124,9 @@ export function cloudinaryPublicIdFromUrl(url: string): string | null {
   }
 }
 
+/** Alias for cloudinaryPublicIdFromUrl */
+export const getImageIdFromUrl = cloudinaryPublicIdFromUrl;
+
 /**
  * Inject f_auto,q_auto (+ optional w/h/c_fill) into an existing Cloudinary URL
  * right after `/upload/`. Non-Cloudinary URLs pass through untouched, so this
@@ -122,8 +142,5 @@ export function cloudinaryThumb(url: string, w: number, h?: number): string {
     ...(h ? [`h_${h}`, 'c_fill'] : []),
   ].join(',');
 
-  // Only a leading version segment (v1712345678/) is dropped — real folder
-  // paths stay untouched. Pre-existing transform segments (rare in our URLs)
-  // simply accumulate, which is valid Cloudinary syntax.
   return url.replace(/\/upload\/(?:v\d+\/)?/, `/upload/${transforms}/`);
 }

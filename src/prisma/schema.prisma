@@ -347,7 +347,7 @@ model HeroSlide {
   subtitle  String   @default("")
   ctaText   String   @default("Shop Now")
   ctaLink   String   @default("/shop") // internal path or absolute URL
-  image     String // Cloudinary delivery URL
+  image     String // Database-backed or externally hosted image URL
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
@@ -378,3 +378,20 @@ model FinanceTransaction {
   @@index([date])
   @@index([category])
 }
+
+// ─── Uploaded Files (Database Image & Media Storage) ─────────────────────────
+
+model UploadedFile {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  filename    String
+  contentType String   @default("image/jpeg")
+  data        Bytes
+  size        Int
+  folder      String?  @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([folder])
+  @@index([createdAt])
+}
+

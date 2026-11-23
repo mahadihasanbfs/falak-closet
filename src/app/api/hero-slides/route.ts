@@ -202,14 +202,21 @@ export async function DELETE(req: Request) {
 
     await prisma.heroSlide.delete({ where: { id } });
 
-    // Best-effort destroy of the Cloudinary asset — only our own namespace,
-    // fire-and-forget (never blocks the delete), same policy as the product
-    // flow but server-to-server since this is a route handler.
+    // Best-effort destroy of the database or Cloudinary asset —
+    // fire-and-forget (never blocks the delete).
     const publicId = cloudinaryPublicIdFromUrl(existing.image);
-    if (publicId?.startsWith('falak-closet/')) {
-      cloudinary.uploader
-        .destroy(publicId, { resource_type: 'image' })
-        .catch((err) => console.warn('[DELETE /api/hero-slides] asset cleanup failed:', publicId, err));
+    if (publicId && /^[a-f\d]{24}$/i.test(publicId)) {
+      await prisma.uploadedFile.delete({ where: { id: publicId } }).catch(() => null);
+    } else if (publicId?.startsWith('falak-closet/')) {
+      try {
+        if (process.env.CLOUDINARY_URL || process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
+          cloudinary.uploader
+            .destroy(publicId, { resource_type: 'image' })
+            .catch((err) => console.warn('[DELETE /api/hero-slides] asset cleanup failed:', publicId, err));
+        }
+      } catch {
+        // Ignore
+      }
     }
 
     bustHeroCache();

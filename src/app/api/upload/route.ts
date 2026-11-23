@@ -1,37 +1,25 @@
 import { NextResponse } from 'next/server';
-import { v2 as cloudinary, type UploadApiResponse } from 'cloudinary';
+import { prisma } from '@/lib/prisma';
 
 /**
- * Signed Cloudinary upload/delete endpoint.
+ * Image & Media upload/delete endpoint.
  *
- * The only place in the app that touches the Cloudinary SDK — API secrets live
- * here (server) and never cross to the client. Uploads land under a single
- * `falak-closet/` namespace so assets are easy to prune per area (products,
- * banners, …).
+ * Uploads are stored directly in the MongoDB database (via Prisma `UploadedFile` model).
+ * Images are served via `/api/images/[id]` from the same database.
  */
 
 // Route handlers are dynamic by default in Next 16 — keep uploads uncached.
 export const dynamic = 'force-dynamic';
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB per image
-const MAX_VIDEO_BYTES = 60 * 1024 * 1024; // 60 MB per video
-const NAMESPACE = 'falak-closet';
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15 MB per image (MongoDB max BSON doc is 16 MB)
+const MAX_VIDEO_BYTES = 15 * 1024 * 1024; // 15 MB per video
 const FOLDER_RE = /^[a-z0-9/_-]{1,60}$/;
 
-function cloudName(): string | null {
-  return process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim() || null;
-}
-
-function configured(): boolean {
-  return Boolean(process.env.CLOUDINARY_URL);
-}
-
-/** `products` → `falak-closet/products`; rejects anything unexpected. */
-function safeFolder(raw: unknown): string | null {
+/** Normalize the logical storage folder without allowing arbitrary input. */
+function safeFolder(raw: unknown): string {
   const hint = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
-  if (!hint) return NAMESPACE;
-  if (!FOLDER_RE.test(hint)) return null;
-  return `${NAMESPACE}/${hint}`;
+  if (!hint || !FOLDER_RE.test(hint)) return 'uploads';
+  return hint;
 }
 
 interface UploadResult {
@@ -46,14 +34,6 @@ interface UploadResult {
 
 // ─── POST /api/upload — multipart/form-data { file | files[], folder? } ──────
 export async function POST(req: Request) {
-  if (!configured() || !cloudName()) {
-    console.error('[POST /api/upload] Cloudinary is not configured');
-    return NextResponse.json(
-      { success: false, error: 'Cloudinary is not configured' },
-      { status: 500 }
-    );
-  }
-
   let form: FormData;
   try {
     form = await req.formData();
@@ -65,12 +45,6 @@ export async function POST(req: Request) {
   }
 
   const folder = safeFolder(form.get('folder'));
-  if (!folder) {
-    return NextResponse.json(
-      { success: false, error: 'Invalid folder name' },
-      { status: 400 }
-    );
-  }
 
   const files = [...form.getAll('file'), ...form.getAll('files')].filter(
     (f): f is File => f instanceof File
@@ -99,8 +73,9 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: `"${file.name}" exceeds the ${isVideo ? '60 MB' : '10 MB'} limit`,
+          error: `"${file.name}" exceeds the 15 MB database document limit`,
           uploaded: results,
+          results,
         },
         { status: 413 }
       );
@@ -108,72 +83,73 @@ export async function POST(req: Request) {
 
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
-      const resourceType = isVideo ? 'video' : 'image';
-      const uploaded = await new Promise<UploadApiResponse>((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          { folder, resource_type: resourceType, filename: file.name },
-          (err, res) => (err || !res ? reject(err ?? new Error('Empty Cloudinary response')) : resolve(res))
-        );
-        stream.end(buffer);
+      const record = await prisma.uploadedFile.create({
+        data: {
+          filename: file.name || 'image.jpg',
+          contentType: file.type || 'image/jpeg',
+          data: buffer,
+          size: buffer.length,
+          folder,
+        },
       });
 
+      const url = `/api/images/${record.id}`;
+      const format = file.type.split('/')[1] || (isVideo ? 'mp4' : 'jpeg');
+
       results.push({
-        url: uploaded.url,
-        secureUrl: uploaded.secure_url,
-        publicId: uploaded.public_id,
-        width: uploaded.width ?? null,
-        height: uploaded.height ?? null,
-        format: uploaded.format,
-        bytes: uploaded.bytes ?? file.size,
+        url,
+        secureUrl: url,
+        publicId: record.id,
+        width: null,
+        height: null,
+        format,
+        bytes: buffer.length,
       });
     } catch (err) {
-      console.error('[POST /api/upload]', err);
+      console.error('[POST /api/upload] Database insert failed:', err);
       return NextResponse.json(
         {
           success: false,
-          error: `Cloudinary rejected "${file.name}"`,
+          error: `Failed to save "${file.name}" to database`,
           uploaded: results,
+          results,
         },
-        { status: 502 }
+        { status: 500 }
       );
     }
   }
 
-  return NextResponse.json({ success: true, results }, { status: 201 });
+  return NextResponse.json({ success: true, results, uploaded: results }, { status: 201 });
 }
 
-// ─── DELETE /api/upload — body { publicId } ─────────────────────────────────
+// ─── DELETE /api/upload — body { publicId | url } ────────────────────────────
 export async function DELETE(req: Request) {
-  if (!configured() || !cloudName()) {
-    console.error('[DELETE /api/upload] Cloudinary is not configured');
-    return NextResponse.json(
-      { success: false, error: 'Cloudinary is not configured' },
-      { status: 500 }
-    );
-  }
-
   const body = await req.json().catch(() => null);
-  const publicId = typeof body?.publicId === 'string' ? body.publicId.trim() : '';
+  const rawId =
+    typeof body?.publicId === 'string'
+      ? body.publicId.trim()
+      : typeof body?.url === 'string'
+      ? body.url.trim()
+      : '';
 
-  // Only our own namespace is deletable — never arbitrary Cloudinary paths.
-  if (!publicId.startsWith(`${NAMESPACE}/`)) {
+  if (!rawId) {
     return NextResponse.json(
-      { success: false, error: 'Invalid publicId' },
+      { success: false, error: 'Missing publicId or url' },
       { status: 400 }
     );
   }
 
-  try {
-    const outcome = await cloudinary.uploader.destroy(publicId, {
-      resource_type: 'image',
-    });
-    // 'not found' is fine — the asset is gone either way.
-    return NextResponse.json({ success: true, result: outcome.result });
-  } catch (err) {
-    console.error('[DELETE /api/upload]', err);
-    return NextResponse.json(
-      { success: false, error: 'Failed to delete image' },
-      { status: 502 }
-    );
+  // 1. Check if target is a database image (24-hex ObjectId or /api/images/[id])
+  const objectIdMatch = rawId.match(/([a-f\d]{24})/i);
+  if (objectIdMatch) {
+    const fileId = objectIdMatch[1];
+    try {
+      await prisma.uploadedFile.delete({ where: { id: fileId } });
+    } catch {
+      // Ignore not found or already deleted
+    }
+    return NextResponse.json({ success: true, result: 'ok' });
   }
+
+  return NextResponse.json({ success: true, result: 'ok' });
 }

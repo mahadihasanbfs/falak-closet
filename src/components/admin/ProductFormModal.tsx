@@ -666,7 +666,7 @@ export function ProductFormModal({
     // the state updater (React StrictMode replays updaters in dev).
     const removed = colorVariations.find((c) => c.id === colorId)?.images[imgIdx];
     const publicId = removed ? cloudinaryPublicIdFromUrl(removed) : null;
-    if (publicId?.startsWith('falak-closet/')) {
+    if (publicId) {
       deleteCloudinaryImage(publicId);
     }
 

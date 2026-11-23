@@ -26,6 +26,27 @@ import { formatCurrency } from '@/lib/utils';
 import { sendProductUpdateNotification } from '@/lib/socketClient';
 import { getYouTubeEmbedUrl, isYouTubeUrl } from '@/lib/videoUtils';
 
+function databaseMediaId(url: string | null | undefined): string | null {
+  const match = url?.match(/\/api\/(?:images|upload)\/([a-f\d]{24})(?:[/?#]|$)/i);
+  return match?.[1] ?? null;
+}
+
+async function deleteDatabaseMedia(url: string | null | undefined): Promise<void> {
+  const id = databaseMediaId(url);
+  if (!id) return;
+
+  try {
+    await fetch('/api/upload', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ publicId: id }),
+    });
+  } catch (err) {
+    // Cleanup should never make saving landing-page settings fail.
+    console.warn('Could not delete old database media:', err);
+  }
+}
+
 export function LandingPagesTab() {
   const admin = useAdminDashboard();
   const [products, setProducts] = useState<Product[]>([]);
@@ -34,10 +55,17 @@ export function LandingPagesTab() {
 
   // Form fields
   const [videoUrl, setVideoUrl] = useState<string>('');
+  const [localVideoPreview, setLocalVideoPreview] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+
+  useEffect(() => {
+    return () => {
+      if (localVideoPreview) URL.revokeObjectURL(localVideoPreview);
+    };
+  }, [localVideoPreview]);
 
   // Sync products from admin context or fetch if empty
   useEffect(() => {
@@ -66,6 +94,7 @@ export function LandingPagesTab() {
   useEffect(() => {
     if (selectedProduct) {
       setVideoUrl(selectedProduct.videoUrl || '');
+      setLocalVideoPreview('');
       setSaveSuccess(false);
       setUploadError(null);
     }
@@ -116,6 +145,8 @@ export function LandingPagesTab() {
 
     setIsUploading(true);
     setUploadError(null);
+    const localPreviewUrl = URL.createObjectURL(file);
+    setLocalVideoPreview(localPreviewUrl);
 
     try {
       const formData = new FormData();
@@ -132,10 +163,14 @@ export function LandingPagesTab() {
         throw new Error(data.error || 'Failed to upload video');
       }
 
-      const uploadedUrl = data.uploaded?.[0]?.secureUrl || data.uploaded?.[0]?.url;
+      const uploaded = data.results?.[0] ?? data.uploaded?.[0];
+      const uploadedUrl = uploaded?.secureUrl || uploaded?.url;
       if (uploadedUrl) {
         setVideoUrl(uploadedUrl);
+        setLocalVideoPreview('');
         admin.addToast('success', 'Video uploaded successfully! Click "Save Changes" to apply.');
+      } else {
+        throw new Error('Upload succeeded but no preview URL was returned.');
       }
     } catch (err) {
       console.error('Video upload error:', err);
@@ -180,6 +215,12 @@ export function LandingPagesTab() {
             : p
         )
       );
+
+      // Remove the previous database upload only after the product now points
+      // at the new value. External URLs and YouTube URLs are left untouched.
+      if (selectedProduct.videoUrl !== payload.videoUrl) {
+        await deleteDatabaseMedia(selectedProduct.videoUrl);
+      }
 
       setSaveSuccess(true);
       sendProductUpdateNotification({
@@ -460,7 +501,7 @@ export function LandingPagesTab() {
                   </div>
                   <div>
                     <span className="text-xs font-bold text-[#800020]">
-                      {isUploading ? 'Uploading Video to Cloudinary...' : 'Click to Browse & Upload Video'}
+                      {isUploading ? 'Uploading Video to Database...' : 'Click to Browse & Upload Video'}
                     </span>
                     <p className="text-[11px] text-stone-400 mt-0.5">
                       Max file size: 60 MB. MP4 or WebM format recommended.
@@ -480,7 +521,7 @@ export function LandingPagesTab() {
             {/* Video URL Input */}
             <div className="space-y-1.5 pt-2">
               <label className="block text-[11px] font-bold uppercase tracking-wider text-stone-700">
-                Option 2: Direct Video URL (YouTube / CDN / Cloudinary)
+                Option 2: Direct Video URL (YouTube / CDN)
               </label>
               <input
                 type="url"
@@ -501,7 +542,7 @@ export function LandingPagesTab() {
                 <span>Media Display Preview</span>
               </span>
 
-              {videoUrl ? (
+              {videoUrl || localVideoPreview ? (
                 <div className="space-y-2">
                   <div className="relative rounded-2xl overflow-hidden bg-black aspect-video border border-stone-200 shadow-md">
                     {isYouTube && youTubeEmbedUrl ? (
@@ -514,7 +555,7 @@ export function LandingPagesTab() {
                       />
                     ) : (
                       <video
-                        src={videoUrl}
+                        src={localVideoPreview || videoUrl}
                         controls
                         playsInline
                         className="w-full h-full object-cover"

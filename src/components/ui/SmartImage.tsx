@@ -19,8 +19,9 @@ interface SmartImageProps {
 
 /**
  * Cloudinary srcs render via CldImage (auto format/quality by default);
- * everything else — data: URLs, Unsplash, local paths — falls back to
- * next/image so legacy base64 products keep working everywhere.
+ * database images (/api/images/...), local paths, Unsplash, and data URLs
+ * render via next/image. Local database images are set to unoptimized so they
+ * are served directly from the database API with browser caching.
  */
 export function SmartImage({
   src,
@@ -49,6 +50,9 @@ export function SmartImage({
     );
   }
 
+  const isLocalApi = typeof src === 'string' && src.startsWith('/api/');
+  const isDataUrl = typeof src === 'string' && src.startsWith('data:');
+
   return (
     <Image
       src={src}
@@ -60,6 +64,7 @@ export function SmartImage({
       {...(sizes ? { sizes } : {})}
       {...(priority ? { priority: true } : {})}
       {...(style ? { style } : {})}
+      unoptimized={isLocalApi || isDataUrl}
     />
   );
 }
